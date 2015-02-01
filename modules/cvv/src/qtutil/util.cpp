@@ -285,7 +285,7 @@ QImage convert(const cv::Mat &mat, unsigned int threads)
 		for (std::size_t i = 0; i < nThreads; i++)
 		{
 			workerThreads.emplace_back(
-			    convertPart<depth, channels>, mat, std::ref(img),
+			    &convertPart<depth, channels>, mat, std::ref(img),
 			    i * nperthread, i * nperthread + nperthread);
 		}
 		// there may be some rows left
