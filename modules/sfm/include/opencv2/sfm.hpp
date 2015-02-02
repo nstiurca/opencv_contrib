@@ -42,7 +42,9 @@
 #ifndef __OPENCV_SFM_LENLEN_HPP__
 #define __OPENCV_SFM_LENLEN_HPP__
 
-#include "opencv2/core/cvdef.h"
+#include <vector>
+#include "opencv2/core.hpp"
+#include "opencv2/features2d.hpp"
 
 /** @defgroup sfm Structure-from-Motion (SfM) API
 
@@ -53,8 +55,33 @@ Structure-from-Motion (SfM) API
 
 namespace cv
 {
+/////////////////////////////////////////////////
+// Module initialization
+/////////////////////////////////////////////////
 CV_EXPORTS bool initModule_sfm(void);
+
+/////////////////////////////////////////////////
+// TYPEDEFS
+/////////////////////////////////////////////////
+typedef std::vector<Mat> vMat;
+typedef std::vector<vMat> vvMat;
+typedef std::vector<UMat> vUMat;
+typedef std::vector<vUMat> vvUMat;
+typedef std::vector<DMatch> vDMatch;
+typedef std::vector<vDMatch> vvDMatch;
+typedef std::vector<Point> vPoint;
+typedef std::vector<KeyPoint> vKeyPoint;
+typedef std::vector<vKeyPoint> vvKeyPoint;
+
+
+/////////////////////////////////////////////////
+// Match pruning
+/////////////////////////////////////////////////
+CV_EXPORTS vDMatch pruneUnmatched(const vvDMatch &allMatches, const double maxDistanceRatio);
+CV_EXPORTS void pruneAsymmetric(vDMatch &matches_i, vDMatch &matches_j);
+CV_EXPORTS void getSymmetricMatches(const Ptr<DescriptorMatcher> &matcher,
+		InputArray descriptors1, InputArray descriptors2,
+		CV_OUT vDMatch &matches_12, CV_OUT vDMatch &matches_21, double maxDistanceRatio);
 }
 
-#include "opencv2/sfm/sfm_api.hpp"
 #endif //__OPENCV_SFM_LENLEN_HPP__

@@ -2,13 +2,18 @@
 // INCLUDES
 //////////////////////////////////////////////////
 
+#include <forward_list>
 #include <iostream>
 #include <iomanip>
+#include <memory>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
-#include <map>
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/cvv.hpp>
 #include <opencv2/sfm.hpp>
 #include "logging.h"
 using namespace std;
@@ -17,13 +22,6 @@ using namespace cv;
 /////////////////////////////////////////////////
 // TYPEDEFS
 /////////////////////////////////////////////////
-typedef vector<Mat> vMat;
-typedef vector<vMat> vvMat;
-typedef vector<UMat> vUMat;
-typedef vector<vUMat> vvUMat;
-typedef vector<DMatch> vDMatch;
-typedef vector<vDMatch> vvDMatch;
-typedef vector<KeyPoint> vKeyPoint;
 typedef vector<String> vString;
 typedef Vec<double, 5> Vec5d;
 typedef Matx<double, 6,6> Matx66d;
@@ -39,6 +37,8 @@ struct CameraInfo
 {
 	Matx33d K;
 	Vec5d k;
+	int rows;
+	int cols;
 };
 
 struct Time
@@ -76,44 +76,372 @@ struct Options
 	String descriptor;
 	String matcher;
 	double match_ratio;
+
+	static Options create(const String &optionsFname);
 };
 
-ostream& operator<<(ostream &out, const PoseWithVel &odo);
-istream& operator>>(istream &in, PoseWithVel &odo);
-ostream& operator<<(ostream &out, const Options &o);
+struct SfMMatcher
+{
+	Ptr<FeatureDetector> detector;
+	Ptr<DescriptorExtractor> extractor;
+	Ptr<Feature2D> feature2d;
+	Ptr<DescriptorMatcher> matcher;
+
+	vvKeyPoint allKeypoints;
+	vUMat allDescriptors;
+
+
+	void detectAndComputeKeypoints( const vUMat &images );
+
+	static SfMMatcher create(const Options &opts);
+};
+
+//struct FeatureID
+//{
+//	int frameID;
+//	int pointID;
+//
+//	bool operator==(const FeatureID &that) const { return frameID == that.frameID && pointID == that.pointID; }
+//};
+//
+//typedef unordered_set<FeatureID> usFeatureID;
+//
+//namespace std {
+//template <> struct hash<FeatureID>
+//{
+//	size_t operator()(const FeatureID &f) const
+//	{
+//		return hash<int>()(f.frameID) ^ hash<int>()(-f.pointID);
+//	}
+//}; }
+//
+//class FeatureTrack
+//{
+//	struct ValidChecker
+//	{
+//		FeatureTrack &f;
+//
+//		//explicit ValidChecker(FeatureTrack &f) : f(f) {}
+//#ifndef NDEBUG
+//		~ValidChecker()
+//		{
+//			if(f.isRoot()) CV_DbgAssert(f.features.size() > 0);
+//			else           CV_DbgAssert(f.features.size() == 0);
+//			CV_DbgAssert(f.size() > 0);
+//			CV_DbgAssert(root);
+//		}
+//#endif
+//	};
+//
+////	struct Data
+////	{
+////		vKeyPoint keypoints;
+////		vector<FeatureID> ids;
+////		UMat descriptors;
+////	};
+//	FeatureTrack *root;
+//	usFeatureID features;
+//
+//public:
+//	FeatureTrack()  = delete; //: root(this) {}
+//	explicit FeatureTrack(const FeatureID &f) : root(this), features({f}) {}
+//	FeatureTrack(const FeatureTrack &) = delete;	// no copy ctor
+//	FeatureTrack(FeatureTrack &&) = delete;			// no move ctor
+//
+//	FeatureTrack& operator=(const FeatureTrack &) = delete;	// no copy assignment
+//	FeatureTrack&& operator=(FeatureTrack &&) = delete;		// no move assignment
+//
+//	bool isRoot() { ValidChecker chk{*this}; return this == root; }
+//
+//	FeatureTrack* getRoot()
+//	{
+//		ValidChecker chk{*this};
+//		if(isRoot()) return this;
+//
+//		return root = root->getRoot();	// path compression
+//	}
+//
+//	bool insert(const FeatureID &f)
+//	{
+//		ValidChecker chk{*this};
+//		return getFeatures().insert(f).second;
+//	}
+//
+//	usFeatureID& getFeatures()
+//	{
+//		ValidChecker chk{*this};
+//		return getRoot()->features;
+//	}
+//
+//	size_t size()
+//	{
+//		ValidChecker chk{*this};
+//		return getFeatures().size();
+//	}
+//
+//	friend void merge(FeatureTrack *a, FeatureTrack *b);
+//};
+//
+//FeatureTrack& getOrCreateFeatureTrack(unordered_map<FeatureID, FeatureTrack> &tracksMap, const FeatureID &f)
+//{
+//	auto it = tracksMap.find(f);
+//
+//	if(tracksMap.end() == it) {
+//		it = tracksMap.emplace(piecewise_construct, make_tuple(f), make_tuple(f)).first;
+//		CV_DbgAssert(it->second.size() == 1);
+//		CV_DbgAssert(it->second.isRoot());
+//	}
+//
+//	DEBUG(&it->second);
+//	DEBUG(it->second.size());
+//	CV_DbgAssert(it->second.size() > 0);
+//
+//	return it->second;
+//}
+//
+//typedef unordered_set<FeatureID> FeatureTrack;
+//typedef shared_ptr<FeatureTrack> FeatureTrackPtr;
+
+class FeatureTrack
+{
+public:
+	struct ID
+	{
+		short frameID;
+		short pointID;
+	};
+
+	struct IDHash
+	{
+		size_t operator()(const FeatureTrack::ID &f) const
+		{
+//			hash<uint32_t> h;
+//			return h(f.frameID) ^ h(-f.pointID);
+			return hash<uint32_t>()((((uint32_t)f.frameID) << 16) | (uint32_t)f.pointID);
+		}
+	};
+
+	struct Node
+	{
+		ID parent;
+		short rank;
+
+		explicit Node(ID id) : parent(id), rank(0) {}
+	};
+
+	void makeSet(const ID id);
+	void merge(const ID x, const ID y);
+	void link(const ID x, const ID y);
+	ID findSet(const ID x);
+
+	typedef unordered_map<FeatureTrack::ID, vector<FeatureTrack::ID>, IDHash> roots_t;
+	roots_t getRootTracks();
+
+private:
+	unordered_map<ID, Node, IDHash> tracks;
+}; // class FeatureTrack
+
+bool operator==(const FeatureTrack::ID &a, const FeatureTrack::ID &b)
+		{ return a.frameID == b.frameID && a.pointID == b.pointID; }
+bool operator!=(const FeatureTrack::ID &a, const FeatureTrack::ID &b)
+		{ return !(a == b); }
 
 //////////////////////////////////////////////////
 // Prototypes
 //////////////////////////////////////////////////
 void usage(int argc, char **argv);
-Options getOptions(const string &optionsFname);
+
+ostream& operator<<(ostream &out, const PoseWithVel &odo);
+istream& operator>>(istream &in, PoseWithVel &odo);
+ostream& operator<<(ostream &out, const Options &o);
+
+
+//////////////////////////////////////////////////
+// Init modules
+//////////////////////////////////////////////////
+bool haveFeatures2d = initModule_features2d();
+//bool havexFeatures2d = initModule_xfeatures2d();
+bool haveSfm = initModule_sfm();
 
 //////////////////////////////////////////////////
 // MAIN
 //////////////////////////////////////////////////
 int main(int argc, char **argv)
 {
+	// args?
 	if(2 != argc) {
 		usage(argc, argv);
 		exit(-1);
 	}
 
-	Options opts = getOptions(argv[1]);
+	// silly check of which algorithms are available
+	{
+		vString algorithms;
+		Algorithm::getList(algorithms);
+		DEBUG(algorithms);
+	}
 
+	// parse the options from the YAML file
+	Options opts = Options::create(argv[1]);
 	INFO(opts);
 
+	// get names of images
 	vString imgNames;
 	glob(opts.data_dir + "/" + opts.imgs_glob, imgNames);
+	if(opts.end_idx>0) {
+		imgNames.resize(opts.end_idx);
+	}
+	if(opts.begin_idx>0) {
+		vString trunc(imgNames.begin() + opts.begin_idx, imgNames.end());
+		swap(trunc, imgNames);
+	}
 	const int N = imgNames.size();
 
+	// load images
 	INFO(N);
 	vUMat imgsC(N), imgsG(N);
+	INFO_STR("Loading images: ");
 	for(int i=0; i<N; ++i) {
 		imgsC[i] = imread(imgNames[i], IMREAD_COLOR).getUMat(USAGE_ALLOCATE_DEVICE_MEMORY);
 		imgsG[i] = imread(imgNames[i], IMREAD_GRAYSCALE).getUMat(USAGE_ALLOCATE_DEVICE_MEMORY);
+
+		CV_Assert(imgsC[i].rows == opts.ci.rows);
+		CV_Assert(imgsC[i].cols == opts.ci.cols);
+
+		DEBUG(imgsC[i].size());
+
+		cvv::showImage(imgsC[i], CVVISUAL_LOCATION, imgNames[i].c_str());
 	}
 
+	// create SfM matcher
+	SfMMatcher matcher = SfMMatcher::create(opts);
 
+	// get keypoints
+	matcher.detectAndComputeKeypoints(imgsG);
+
+	// do pairwise, symmetric matching over all image pairs
+	vector<vector<vDMatch>> pairwiseMatches(N, vector<vDMatch>(N));
+	char description[100];
+	for(int i=0; i<N; ++i) {
+		for(int j=0; j<i; ++j) {
+			INFO(i);
+			INFO(j);
+
+			getSymmetricMatches(matcher.matcher,
+					matcher.allDescriptors[i], matcher.allDescriptors[j],
+					pairwiseMatches[i][j], pairwiseMatches[j][i], opts.match_ratio);
+			INFO(pairwiseMatches[i][j].size());
+
+			snprintf(description, sizeof(description), "symmetric matches %i  %i", i, j);
+			cvv::debugDMatch(imgsC[i], matcher.allKeypoints[i], imgsC[j], matcher.allKeypoints[j],
+								pairwiseMatches[i][j], CVVISUAL_LOCATION, description);
+		}
+	}
+
+	// build feature tracks
+	FeatureTrack tracks;
+	for(int i=0; i<N; ++i) {
+		for(int j=0; j<i; ++j) {
+			for(const DMatch &m : pairwiseMatches[i][j]) {
+				// TODO: make sure queryIdx and trainIdx aren't backwards
+//				FeatureTrack &f1 = getOrCreateFeatureTrack(tracksMap, {i, m.queryIdx});
+//				FeatureTrack &f2 = getOrCreateFeatureTrack(tracksMap, {j, m.trainIdx});
+				const FeatureTrack::ID f1 = {i, m.queryIdx};
+				const FeatureTrack::ID f2 = {j, m.trainIdx};
+				tracks.makeSet(f1);
+				tracks.makeSet(f2);
+				tracks.merge(f1, f2);
+//
+//				auto i1 = tracksMap.find(f1);
+//				auto i2 = tracksMap.find(f2);
+//
+//				if(tracksMap.end() == i1) {
+//					i1 = tracksMap.emplace(piecewise_construct, make_tuple(f1), make_tuple(f1)).first;
+//					CV_DbgAssert(i1->second.size() == 1);
+//					CV_DbgAssert(i1->second.isRoot());
+//				}
+//
+//				if(tracksMap.end() == i2) {
+//					i2 = tracksMap.emplace(piecewise_construct, make_tuple(f2), make_tuple(f2)).first;
+//					CV_DbgAssert(i2->second.size() == 1);
+//					CV_DbgAssert(i2->second.isRoot());
+//				}
+//
+//				const size_t s1 = i1->second.size();
+//				const size_t s2 = i2->second.size();
+//				INFO(s1);
+//				INFO(s2);
+//
+//				CV_Assert(s1>0);
+//				CV_Assert(s2>0);
+//
+//				merge(&f1, &f2);
+//
+//				DEBUG(f1.size());
+//				DEBUG(f2.size());
+//				CV_DbgAssert(f1.size() > 0);
+//				CV_DbgAssert(f2.size() > 0);
+//				CV_DbgAssert(f1.size() == f2.size());
+			}
+		}
+	}
+//
+//	vector<FeatureTrack *> rootTracks;
+//	for(auto &it : tracksMap) {
+//		if(it.second.isRoot()) {
+//			FeatureTrack *root = it.second.getRoot();
+//			rootTracks.push_back(root);
+//
+//			DEBUG(root->size());
+//		}
+//	}
+
+	FeatureTrack::roots_t rootTracks = tracks.getRootTracks();
+	INFO(rootTracks.size());
+
+	// display tracks
+	{
+		Mat stitched(opts.ci.rows * N, opts.ci.cols, imgsC[0].type());
+		Mat imgTracks[N];
+		for(int i=0; i<N; ++i) {
+			imgTracks[i] = stitched.rowRange(i*opts.ci.rows, (i+1)*opts.ci.rows);
+			CV_Assert(imgTracks[i].rows == imgsC[i].rows);
+			CV_Assert(imgTracks[i].cols == imgsC[i].cols);
+			CV_Assert(imgTracks[i].type() == imgsC[i].type());
+			imgsC[i].copyTo(imgTracks[i]);
+		}
+
+		for(auto &track : rootTracks) {
+			if(track.second.size() < N) continue;
+			INFO(track.first.frameID);
+			INFO(track.first.pointID);
+			sort(track.second.begin(), track.second.end(), [&](const FeatureTrack::ID &a, const FeatureTrack::ID &b)
+					{ return a.frameID < b.frameID; });
+
+			Point pts[N];
+			Matx41d c = Scalar::randu(0, 255);
+			Scalar color(c.val[0], c.val[1], c.val[2]);
+			for(int j=0; j<N; ++j) {
+				const FeatureTrack::ID &id = track.second[j];
+				pts[j] = matcher.allKeypoints[id.frameID][id.pointID].pt;
+				INFO(pts[j]);
+				pts[j].y += j*opts.ci.rows;
+				circle(stitched, pts[j], 4, color);
+				if(j>0) {
+					arrowedLine(stitched, pts[j-1], pts[j], color);
+				}
+			}
+			const Point * const pts_ = pts;
+//			const Point* const* pts_ = const_cast<const Point * const *>(&pts);
+//			polylines(stitched, &pts_, &N, 1, false, color);
+//			polylines(stitched, pts, false, color);
+		}
+
+		cvv::showImage(stitched, CVVISUAL_LOCATION, "stitched tracks");
+	}
+
+	// cvv needs this
+	cvv::finalShow();
 
 	return 0;
 }
@@ -131,8 +459,10 @@ void usage(int agrc, char** argv)
 //////////////////////////////////////////////////
 // OPTIONS
 //////////////////////////////////////////////////
-Options getOptions(const string &optionsFname)
+Options Options::create(const String &optionsFname)
 {
+	INFO(optionsFname);
+
 	FileStorage fs(optionsFname, FileStorage::READ);
 	if(!fs.isOpened()) {
 		cout << "could not open file \"" << optionsFname
@@ -157,6 +487,8 @@ Options getOptions(const string &optionsFname)
 			(double)fs["k3"],
 			(double)fs["k4"],
 			(double)fs["k5"];
+	ret.ci.rows = (int)fs["ImageH"];
+	ret.ci.cols = (int)fs["ImageW"];
 
 	ret.detector = (String)fs["detector"];
 	ret.descriptor = (String)fs["descriptor"];
@@ -164,6 +496,166 @@ Options getOptions(const string &optionsFname)
 	ret.match_ratio = (double)fs["match_ratio"];
 
 	return ret;
+}
+
+//////////////////////////////////////////////////
+// MATCHER
+//////////////////////////////////////////////////
+SfMMatcher SfMMatcher::create(const Options &opts)
+{
+	SfMMatcher ret;
+
+	INFO(opts.detector);
+	ret.detector = FeatureDetector::create<FeatureDetector>(opts.detector);
+	DEBUG(ret.detector.get());
+	if(opts.detector == opts.descriptor) {
+		swap(ret.feature2d, ret.detector);
+		DEBUG(ret.feature2d.get());
+		DEBUG(ret.detector.get());
+		INFO_STR("Also using same detector for descriptor extraction");
+	} else {
+		ret.extractor = DescriptorExtractor::create<DescriptorExtractor>(opts.descriptor);
+		INFO(opts.descriptor);
+		DEBUG(ret.extractor.get());
+	}
+
+
+	INFO(opts.matcher);
+	ret.matcher = DescriptorMatcher::create(opts.matcher);
+
+
+	DEBUG(ret.detector.get());
+	DEBUG(ret.extractor.get());
+	DEBUG(ret.feature2d.get());
+	DEBUG(ret.matcher.get());
+
+	CV_Assert((ret.detector.empty() && ret.extractor.empty())
+			^ ret.feature2d.empty());
+	{
+		ORB *orb = dynamic_cast<ORB*>(ret.feature2d.get());
+		if(orb) {
+//			orb->setMaxFeatures(5000);
+			DEBUG(orb->getMaxFeatures());
+			DEBUG(orb->getScaleFactor());
+			DEBUG(orb->getNLevels());
+			DEBUG(orb->getEdgeThreshold());
+			DEBUG(orb->getFirstLevel());
+			DEBUG(orb->getWTA_K());
+			DEBUG(orb->getScoreType());
+			DEBUG(orb->getPatchSize());
+			DEBUG(orb->getFastThreshold());
+		}
+	}
+
+	CV_Assert(!ret.matcher.empty());
+
+	return ret;
+}
+
+void SfMMatcher::detectAndComputeKeypoints( const vUMat &images )
+{
+	const int N = images.size();
+	allKeypoints.resize(N);
+	allDescriptors.resize(N);
+
+	InputArray emptymask = noArray();
+
+	const bool combined = !!feature2d;
+
+	for(int i=0; i<N; ++i) {
+		if(combined) {
+			feature2d->detectAndCompute(images[i], emptymask, allKeypoints[i], allDescriptors[i]);
+		} else {
+			detector->detect(images[i], allKeypoints[i], emptymask);
+			extractor->compute(images[i], allKeypoints[i], allDescriptors[i]);
+		}
+
+		cvv::debugDMatch(images[i], allKeypoints[i], images[i], allKeypoints[i], vDMatch(), CVVISUAL_LOCATION, "keypoints");
+	}
+}
+
+//////////////////////////////////////////////////
+// FeatureTrack
+//////////////////////////////////////////////////
+//void merge(FeatureTrack *a, FeatureTrack *b)
+//{
+//	FeatureTrack::ValidChecker chka{*a};
+//	FeatureTrack::ValidChecker chkb{*b};
+//
+//	a = a->getRoot();
+//	b = b->getRoot();
+//	FeatureTrack::ValidChecker chka2{*a};
+//	FeatureTrack::ValidChecker chkb2{*b};
+//	// already same track?
+//	if(a == b) return;
+//
+//	// always merge smaller into larger track
+//	if(a->features.size() > b->features.size()) {
+//		swap(a,b);
+//	}
+//
+//	CV_DbgAssert(a->features.size() > 0);
+//	CV_DbgAssert(b->features.size() > 0);
+//	CV_DbgAssert(b->features.size() >= a->features.size());
+//	b->features.insert(a->features.begin(), a->features.end());
+//	a->features.clear();
+//	a->root = b;
+//}
+
+void FeatureTrack::makeSet(const ID id)
+{
+	auto it = tracks.find(id);
+	if(tracks.end() != it) return;
+
+	tracks.emplace(piecewise_construct, make_tuple(id), make_tuple(id));
+//	tracks.emplace(make_pair(id, Node{id, 0}));
+}
+
+void FeatureTrack::merge(const ID x, const ID y)
+{
+	link(findSet(x), findSet(y));
+}
+
+void FeatureTrack::link(const ID x, const ID y)
+{
+	auto itX = tracks.find(x);
+	auto itY = tracks.find(y);
+
+	CV_Assert(tracks.end() != itX);
+	CV_Assert(tracks.end() != itY);
+
+	if(itX->second.rank > itY->second.rank) {
+		itY->second.parent = x;
+	} else {
+		itX->second.parent = y;
+		if(itX->second.rank == itY->second.rank) {
+			++itY->second.rank;
+		}
+	}
+}
+
+FeatureTrack::ID FeatureTrack::findSet(const ID x)
+{
+	auto it = tracks.find(x);
+
+	CV_Assert(tracks.end() != it);
+
+	if(x != it->second.parent) {
+		it->second.parent = findSet(it->second.parent);
+	}
+
+	return it->second.parent;
+}
+
+FeatureTrack::roots_t FeatureTrack::getRootTracks()
+{
+	roots_t rootSets;
+
+	for(auto &idNode : tracks) {
+		rootSets[findSet(idNode.first)].push_back(idNode.first);
+	}
+
+	return rootSets;
 }
 
 //////////////////////////////////////////////////
@@ -210,10 +702,10 @@ ostream& operator<<(ostream &out, const Options &o)
 {
 	return out << NV(o.data_dir) << endl
 			<< NV(o.imgs_glob) << endl
-			<< NV(o.begin_idx) << endl
-			<< NV(o.end_idx) << endl
+			<< NV(o.begin_idx) << NV(o.end_idx) << endl
 			<< NV(o.ci.K) << endl
 			<< NV(o.ci.k) << endl
+			<< NV(o.ci.rows) << NV(o.ci.cols) << endl
 			<< NV(o.detector) << endl
 			<< NV(o.descriptor) << endl
 			<< NV(o.matcher) << endl
