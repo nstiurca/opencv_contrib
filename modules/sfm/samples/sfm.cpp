@@ -63,6 +63,9 @@ struct PoseWithVel
 
 struct Options
 {
+    // hold on to the opened YAML file because otherwise FileNodes below will dangle
+    FileStorage fs;
+
 	// Where is the data?
 	string data_dir;
 	string imgs_glob;
@@ -73,9 +76,13 @@ struct Options
 	CameraInfo ci;
 
 	// Interest point detection and matching
-	String detector;
-	String descriptor;
-	String matcher;
+	String detector_name;
+	FileNode detector_options;
+	String extractor_name;
+	FileNode extractor_options;
+	bool detector_same_as_extractor;
+	String matcher_name;
+	FileNode matcher_options;
 	double match_ratio;
 
 	static Options create(const String &optionsFname);
@@ -212,8 +219,6 @@ int main(int argc, char **argv)
 		CV_Assert(imgsC[i].rows == opts.ci.rows);
 		CV_Assert(imgsC[i].cols == opts.ci.cols);
 
-		DEBUG(imgsC[i].size());
-
 		cvv::showImage(imgsC[i], CVVISUAL_LOCATION, imgNames[i].c_str());
 	}
 
@@ -293,14 +298,15 @@ Options Options::create(const String &optionsFname)
 {
 	INFO(optionsFname);
 
-	FileStorage fs(optionsFname, FileStorage::READ);
+    Options ret;
+
+    FileStorage &fs = ret.fs;
+	fs.open(optionsFname, FileStorage::READ);
 	if(!fs.isOpened()) {
 		cout << "could not open file \"" << optionsFname
 			<< "\" for reading.";
 		exit(-2);
 	}
-
-	Options ret;
 
 	ret.data_dir = (string)fs["data_dir"];
 	ret.imgs_glob = (string)fs["imgs_glob"];
@@ -320,9 +326,25 @@ Options Options::create(const String &optionsFname)
 	ret.ci.rows = (int)fs["ImageH"];
 	ret.ci.cols = (int)fs["ImageW"];
 
-	ret.detector = (String)fs["detector"];
-	ret.descriptor = (String)fs["descriptor"];
-	ret.matcher = (String)fs["matcher"];
+	ret.detector_options = fs["detector"];
+	ret.detector_name = (String)ret.detector_options["name"];
+
+	ret.extractor_options = fs["extractor"];
+	if(ret.extractor_options.isMap()) {
+        ret.extractor_name = (String)ret.extractor_options["name"];
+        ret.detector_same_as_extractor = false;
+	} else if(ret.extractor_options.isString() && (String)ret.extractor_options == "DETECTOR_SAME_AS_EXTRACTOR") {
+	    ret.extractor_name = ret.detector_name;
+	    ret.extractor_options = ret.detector_options;
+	    ret.detector_same_as_extractor = true;
+	} else {
+	    CV_Error(Error::StsParseError, "Expected \"extractor\" to be a map similar to \"detector\", "
+	            "or the string \"DETECTOR_SAME_AS_EXTRACTOR\".");
+	}
+
+	ret.matcher_name = (String)fs["matcher"]["name"];
+	ret.matcher_options = fs["matcher"]["options"];
+
 	ret.match_ratio = (double)fs["match_ratio"];
 
 	return ret;
@@ -333,26 +355,26 @@ Options Options::create(const String &optionsFname)
 //////////////////////////////////////////////////
 SfMMatcher SfMMatcher::create(const Options &opts)
 {
+    CV_Assert(opts.fs.isOpened());
+
 	SfMMatcher ret;
 
-	INFO(opts.detector);
-	ret.detector = FeatureDetector::create<FeatureDetector>(opts.detector);
-	DEBUG(ret.detector.get());
-	if(opts.detector == opts.descriptor) {
-		swap(ret.feature2d, ret.detector);
-		DEBUG(ret.feature2d.get());
-		DEBUG(ret.detector.get());
-		INFO_STR("Also using same detector for descriptor extraction");
+	if(opts.detector_same_as_extractor) {
+	    INFO(opts.detector_name);
+	    ret.feature2d = Feature2D::create<Feature2D>(opts.detector_name);
+	    ret.feature2d->read(opts.detector_options);
 	} else {
-		ret.extractor = DescriptorExtractor::create<DescriptorExtractor>(opts.descriptor);
-		INFO(opts.descriptor);
-		DEBUG(ret.extractor.get());
+	    INFO(opts.detector_name);
+	    INFO(opts.extractor_name);
+	    ret.detector = FeatureDetector::create<FeatureDetector>(opts.detector_name);
+	    ret.detector->read(opts.detector_options);
+        ret.extractor = DescriptorExtractor::create<DescriptorExtractor>(opts.extractor_name);
+        ret.extractor->read(opts.extractor_options);
 	}
 
-
-	INFO(opts.matcher);
-	ret.matcher = DescriptorMatcher::create(opts.matcher);
-
+	INFO(opts.matcher_name);
+	ret.matcher = DescriptorMatcher::create(opts.matcher_name);
+	ret.matcher->read(opts.matcher_options);
 
 	DEBUG(ret.detector.get());
 	DEBUG(ret.extractor.get());
@@ -579,8 +601,11 @@ ostream& operator<<(ostream &out, const Options &o)
 			<< NV(o.ci.K) << endl
 			<< NV(o.ci.k) << endl
 			<< NV(o.ci.rows) << NV(o.ci.cols) << endl
-			<< NV(o.detector) << endl
-			<< NV(o.descriptor) << endl
-			<< NV(o.matcher) << endl
+			<< NV(o.detector_name) << endl
+			// TODO: output detector options
+			<< NV(o.extractor_name) << endl
+			// TODO: output extractor options
+			<< NV(o.matcher_name) << endl
+			// TODO: output matcher options
 			<< NV(o.match_ratio);
 }
