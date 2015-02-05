@@ -28,6 +28,7 @@ typedef Matx<double, 6,6> Matx66d;
 typedef Matx66d Cov6d;
 typedef Vec<double, 4> Vec4d;
 typedef Vec4d Quatd;
+typedef vector<Ptr<DescriptorMatcher>> vDescriptorMatcher;
 
 /////////////////////////////////////////////////
 // Custom types
@@ -80,128 +81,6 @@ struct Options
 	static Options create(const String &optionsFname);
 };
 
-struct SfMMatcher
-{
-	Ptr<FeatureDetector> detector;
-	Ptr<DescriptorExtractor> extractor;
-	Ptr<Feature2D> feature2d;
-	Ptr<DescriptorMatcher> matcher;
-
-	vvKeyPoint allKeypoints;
-	vUMat allDescriptors;
-
-
-	void detectAndComputeKeypoints( const vUMat &images );
-
-	static SfMMatcher create(const Options &opts);
-};
-
-//struct FeatureID
-//{
-//	int frameID;
-//	int pointID;
-//
-//	bool operator==(const FeatureID &that) const { return frameID == that.frameID && pointID == that.pointID; }
-//};
-//
-//typedef unordered_set<FeatureID> usFeatureID;
-//
-//namespace std {
-//template <> struct hash<FeatureID>
-//{
-//	size_t operator()(const FeatureID &f) const
-//	{
-//		return hash<int>()(f.frameID) ^ hash<int>()(-f.pointID);
-//	}
-//}; }
-//
-//class FeatureTrack
-//{
-//	struct ValidChecker
-//	{
-//		FeatureTrack &f;
-//
-//		//explicit ValidChecker(FeatureTrack &f) : f(f) {}
-//#ifndef NDEBUG
-//		~ValidChecker()
-//		{
-//			if(f.isRoot()) CV_DbgAssert(f.features.size() > 0);
-//			else           CV_DbgAssert(f.features.size() == 0);
-//			CV_DbgAssert(f.size() > 0);
-//			CV_DbgAssert(root);
-//		}
-//#endif
-//	};
-//
-////	struct Data
-////	{
-////		vKeyPoint keypoints;
-////		vector<FeatureID> ids;
-////		UMat descriptors;
-////	};
-//	FeatureTrack *root;
-//	usFeatureID features;
-//
-//public:
-//	FeatureTrack()  = delete; //: root(this) {}
-//	explicit FeatureTrack(const FeatureID &f) : root(this), features({f}) {}
-//	FeatureTrack(const FeatureTrack &) = delete;	// no copy ctor
-//	FeatureTrack(FeatureTrack &&) = delete;			// no move ctor
-//
-//	FeatureTrack& operator=(const FeatureTrack &) = delete;	// no copy assignment
-//	FeatureTrack&& operator=(FeatureTrack &&) = delete;		// no move assignment
-//
-//	bool isRoot() { ValidChecker chk{*this}; return this == root; }
-//
-//	FeatureTrack* getRoot()
-//	{
-//		ValidChecker chk{*this};
-//		if(isRoot()) return this;
-//
-//		return root = root->getRoot();	// path compression
-//	}
-//
-//	bool insert(const FeatureID &f)
-//	{
-//		ValidChecker chk{*this};
-//		return getFeatures().insert(f).second;
-//	}
-//
-//	usFeatureID& getFeatures()
-//	{
-//		ValidChecker chk{*this};
-//		return getRoot()->features;
-//	}
-//
-//	size_t size()
-//	{
-//		ValidChecker chk{*this};
-//		return getFeatures().size();
-//	}
-//
-//	friend void merge(FeatureTrack *a, FeatureTrack *b);
-//};
-//
-//FeatureTrack& getOrCreateFeatureTrack(unordered_map<FeatureID, FeatureTrack> &tracksMap, const FeatureID &f)
-//{
-//	auto it = tracksMap.find(f);
-//
-//	if(tracksMap.end() == it) {
-//		it = tracksMap.emplace(piecewise_construct, make_tuple(f), make_tuple(f)).first;
-//		CV_DbgAssert(it->second.size() == 1);
-//		CV_DbgAssert(it->second.isRoot());
-//	}
-//
-//	DEBUG(&it->second);
-//	DEBUG(it->second.size());
-//	CV_DbgAssert(it->second.size() > 0);
-//
-//	return it->second;
-//}
-//
-//typedef unordered_set<FeatureID> FeatureTrack;
-//typedef shared_ptr<FeatureTrack> FeatureTrackPtr;
-
 class FeatureTrack
 {
 public:
@@ -234,6 +113,8 @@ public:
 	void link(const ID x, const ID y);
 	ID findSet(const ID x);
 
+	void clear() { tracks.clear(); }
+
 	typedef unordered_map<FeatureTrack::ID, vector<FeatureTrack::ID>, IDHash> roots_t;
 	roots_t getRootTracks();
 
@@ -245,6 +126,29 @@ bool operator==(const FeatureTrack::ID &a, const FeatureTrack::ID &b)
 		{ return a.frameID == b.frameID && a.pointID == b.pointID; }
 bool operator!=(const FeatureTrack::ID &a, const FeatureTrack::ID &b)
 		{ return !(a == b); }
+
+struct SfMMatcher
+{
+	Ptr<FeatureDetector> detector;
+	Ptr<DescriptorExtractor> extractor;
+	Ptr<Feature2D> feature2d;
+	Ptr<DescriptorMatcher> matcher;
+
+	vvKeyPoint allKeypoints;
+	vUMat allDescriptors;
+	vDescriptorMatcher allMatchers;
+
+	vector<vector<vDMatch>> pairwiseMatches;
+
+	FeatureTrack tracks;
+
+	void detectAndComputeKeypoints( const vUMat &images );
+	void computePairwiseSymmetricMatches(const double match_ratio);
+	void cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const;
+	void buildFeatureTracks();
+
+	static SfMMatcher create(const Options &opts);
+};
 
 //////////////////////////////////////////////////
 // Prototypes
@@ -320,83 +224,12 @@ int main(int argc, char **argv)
 	matcher.detectAndComputeKeypoints(imgsG);
 
 	// do pairwise, symmetric matching over all image pairs
-	vector<vector<vDMatch>> pairwiseMatches(N, vector<vDMatch>(N));
-	char description[100];
-	for(int i=0; i<N; ++i) {
-		for(int j=0; j<i; ++j) {
-			INFO(i);
-			INFO(j);
-
-			getSymmetricMatches(matcher.matcher,
-					matcher.allDescriptors[i], matcher.allDescriptors[j],
-					pairwiseMatches[i][j], pairwiseMatches[j][i], opts.match_ratio);
-			INFO(pairwiseMatches[i][j].size());
-
-			snprintf(description, sizeof(description), "symmetric matches %i  %i", i, j);
-			cvv::debugDMatch(imgsC[i], matcher.allKeypoints[i], imgsC[j], matcher.allKeypoints[j],
-								pairwiseMatches[i][j], CVVISUAL_LOCATION, description);
-		}
-	}
+	matcher.computePairwiseSymmetricMatches(opts.match_ratio);
+	matcher.cvvVisualizePairwiseMatches(imgsC);
 
 	// build feature tracks
-	FeatureTrack tracks;
-	for(int i=0; i<N; ++i) {
-		for(int j=0; j<i; ++j) {
-			for(const DMatch &m : pairwiseMatches[i][j]) {
-				// TODO: make sure queryIdx and trainIdx aren't backwards
-//				FeatureTrack &f1 = getOrCreateFeatureTrack(tracksMap, {i, m.queryIdx});
-//				FeatureTrack &f2 = getOrCreateFeatureTrack(tracksMap, {j, m.trainIdx});
-				const FeatureTrack::ID f1 = {i, m.queryIdx};
-				const FeatureTrack::ID f2 = {j, m.trainIdx};
-				tracks.makeSet(f1);
-				tracks.makeSet(f2);
-				tracks.merge(f1, f2);
-//
-//				auto i1 = tracksMap.find(f1);
-//				auto i2 = tracksMap.find(f2);
-//
-//				if(tracksMap.end() == i1) {
-//					i1 = tracksMap.emplace(piecewise_construct, make_tuple(f1), make_tuple(f1)).first;
-//					CV_DbgAssert(i1->second.size() == 1);
-//					CV_DbgAssert(i1->second.isRoot());
-//				}
-//
-//				if(tracksMap.end() == i2) {
-//					i2 = tracksMap.emplace(piecewise_construct, make_tuple(f2), make_tuple(f2)).first;
-//					CV_DbgAssert(i2->second.size() == 1);
-//					CV_DbgAssert(i2->second.isRoot());
-//				}
-//
-//				const size_t s1 = i1->second.size();
-//				const size_t s2 = i2->second.size();
-//				INFO(s1);
-//				INFO(s2);
-//
-//				CV_Assert(s1>0);
-//				CV_Assert(s2>0);
-//
-//				merge(&f1, &f2);
-//
-//				DEBUG(f1.size());
-//				DEBUG(f2.size());
-//				CV_DbgAssert(f1.size() > 0);
-//				CV_DbgAssert(f2.size() > 0);
-//				CV_DbgAssert(f1.size() == f2.size());
-			}
-		}
-	}
-//
-//	vector<FeatureTrack *> rootTracks;
-//	for(auto &it : tracksMap) {
-//		if(it.second.isRoot()) {
-//			FeatureTrack *root = it.second.getRoot();
-//			rootTracks.push_back(root);
-//
-//			DEBUG(root->size());
-//		}
-//	}
-
-	FeatureTrack::roots_t rootTracks = tracks.getRootTracks();
+	matcher.buildFeatureTracks();
+	FeatureTrack::roots_t rootTracks = matcher.tracks.getRootTracks();
 	INFO(rootTracks.size());
 
 	// display tracks
@@ -432,9 +265,6 @@ int main(int argc, char **argv)
 				}
 			}
 			const Point * const pts_ = pts;
-//			const Point* const* pts_ = const_cast<const Point * const *>(&pts);
-//			polylines(stitched, &pts_, &N, 1, false, color);
-//			polylines(stitched, pts, false, color);
 		}
 
 		cvv::showImage(stitched, CVVISUAL_LOCATION, "stitched tracks");
@@ -574,34 +404,77 @@ void SfMMatcher::detectAndComputeKeypoints( const vUMat &images )
 	}
 }
 
-//////////////////////////////////////////////////
-// FeatureTrack
-//////////////////////////////////////////////////
-//void merge(FeatureTrack *a, FeatureTrack *b)
-//{
-//	FeatureTrack::ValidChecker chka{*a};
-//	FeatureTrack::ValidChecker chkb{*b};
-//
-//	a = a->getRoot();
-//	b = b->getRoot();
-//	FeatureTrack::ValidChecker chka2{*a};
-//	FeatureTrack::ValidChecker chkb2{*b};
-//	// already same track?
-//	if(a == b) return;
-//
-//	// always merge smaller into larger track
-//	if(a->features.size() > b->features.size()) {
-//		swap(a,b);
-//	}
-//
-//	CV_DbgAssert(a->features.size() > 0);
-//	CV_DbgAssert(b->features.size() > 0);
-//	CV_DbgAssert(b->features.size() >= a->features.size());
-//	b->features.insert(a->features.begin(), a->features.end());
-//	a->features.clear();
-//	a->root = b;
-//}
+void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
+{
+    // do pairwise, symmetric matching over all image pairs
+    const int N = allDescriptors.size();
+    pairwiseMatches.resize(N, vector<vDMatch>(N));
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < i; ++j) {
+            INFO(i);
+            INFO(j);
 
+            getSymmetricMatches(matcher, allDescriptors[i],
+                    allDescriptors[j], pairwiseMatches[i][j],
+                    pairwiseMatches[j][i], match_ratio);
+            INFO(pairwiseMatches[i][j].size());
+        }
+    }
+}
+
+template <typename MAT>
+static void cvvVisualizePairwiseMatchesImpl(const vector<MAT> &imgs,
+        const vvKeyPoint &allKeypoints, const vector<vector<vDMatch>> &pairwiseMatches)
+{
+    const int N = imgs.size();
+    char description[100];
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < i; ++j) {
+            snprintf(description, sizeof(description),
+                    "symmetric matches %i  %i", i, j);
+            cvv::debugDMatch(imgs[i], allKeypoints[i], imgs[j],
+                    allKeypoints[j], pairwiseMatches[i][j],
+                    CVVISUAL_LOCATION, description);
+        }
+    }
+}
+
+void SfMMatcher::cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const
+{
+    if(_imgs.isMatVector()) {
+        vMat imgs;
+        _imgs.getMatVector(imgs);
+        cvvVisualizePairwiseMatchesImpl(imgs, allKeypoints, pairwiseMatches);
+    } else if(_imgs.isUMatVector()) {
+        vUMat imgs;
+        _imgs.getUMatVector(imgs);
+        cvvVisualizePairwiseMatchesImpl(imgs, allKeypoints, pairwiseMatches);
+    } else {
+        CV_Error(Error::StsNotImplemented, "Unknown/unsupported array type");
+    }
+}
+
+void SfMMatcher::buildFeatureTracks()
+{
+    // build feature tracks
+    const int N = pairwiseMatches.size();
+    tracks.clear();
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < i; ++j) {
+            for (const DMatch &m : pairwiseMatches[i][j]) {
+                const FeatureTrack::ID f1 = { i, m.queryIdx };
+                const FeatureTrack::ID f2 = { j, m.trainIdx };
+                tracks.makeSet(f1);
+                tracks.makeSet(f2);
+                tracks.merge(f1, f2);
+            }
+        }
+    }
+}
+
+//////////////////////////////////////////////////
+// FEATURE TRACKS
+//////////////////////////////////////////////////
 void FeatureTrack::makeSet(const ID id)
 {
 	auto it = tracks.find(id);
