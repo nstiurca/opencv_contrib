@@ -3,10 +3,13 @@
 //////////////////////////////////////////////////
 
 #include <forward_list>
+#include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <memory>
 #include <string>
+#include <map>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -131,11 +134,15 @@ private:
 
 bool operator==(const FeatureTrack::ID &a, const FeatureTrack::ID &b)
 		{ return a.frameID == b.frameID && a.pointID == b.pointID; }
+bool operator<(const FeatureTrack::ID &a, const FeatureTrack::ID &b)
+{ return a.frameID == b.frameID ? a.pointID < b.pointID : a.frameID < b.frameID; }
 bool operator!=(const FeatureTrack::ID &a, const FeatureTrack::ID &b)
 		{ return !(a == b); }
 
 struct SfMMatcher
 {
+    CameraInfo ci;
+
 	Ptr<FeatureDetector> detector;
 	Ptr<DescriptorExtractor> extractor;
 	Ptr<Feature2D> feature2d;
@@ -147,12 +154,15 @@ struct SfMMatcher
 
 	vector<vector<vDMatch>> pairwiseMatches;
 
+	typedef map<FeatureTrack::ID, set<FeatureTrack::ID>> match_adjacency_lists_t;
+	match_adjacency_lists_t match_adjacency_lists;
+
 	FeatureTrack tracks;
 
 	void detectAndComputeKeypoints( const vUMat &images );
 	void computePairwiseSymmetricMatches(const double match_ratio);
 	void cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const;
-	void buildFeatureTracks();
+	void buildAdjacencyListsAndFeatureTracks();
 
 	static SfMMatcher create(const Options &opts);
 };
@@ -166,6 +176,8 @@ ostream& operator<<(ostream &out, const PoseWithVel &odo);
 istream& operator>>(istream &in, PoseWithVel &odo);
 ostream& operator<<(ostream &out, const Options &o);
 
+static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const FeatureTrack::ID id,
+        const set<FeatureTrack::ID> &ids);
 
 //////////////////////////////////////////////////
 // Init modules
@@ -233,9 +245,50 @@ int main(int argc, char **argv)
 	matcher.cvvVisualizePairwiseMatches(imgsC);
 
 	// build feature tracks
-	matcher.buildFeatureTracks();
+	matcher.buildAdjacencyListsAndFeatureTracks();
 	FeatureTrack::roots_t rootTracks = matcher.tracks.getRootTracks();
 	INFO(rootTracks.size());
+
+    // write pairwise matches to output files
+    char fname[256] = {0};
+    const string fnameFmt = opts.data_dir + "reconstruction/static_measurement_desc%07d.txt";
+//  boost::filesystem::create_directory(opts.data_dir + "reconstruction");
+    int i = -1;
+    Mat3b srcImg;
+    ofstream ofs;
+    INFO(matcher.match_adjacency_lists.size());
+    for(const auto &it : matcher.match_adjacency_lists) {
+        const FeatureTrack::ID srcID = it.first;
+        const auto &dstIDs = it.second;
+
+        CV_DbgAssert(srcID.frameID >= i);
+        if(srcID.frameID > i) {
+            // got to a new frame, so prepare the next file for output;
+            i = srcID.frameID;
+            srcImg = (Mat3b)imgsC[i].getMat(ACCESS_READ);
+            snprintf(fname, sizeof fname, fnameFmt.c_str(), i);
+            INFO(fname);
+            CV_Assert(ofs);     // check that the previous file was OK
+            ofs.close();        // close previous file
+            ofs.open(fname);    // TODO: check file is ready for opening?
+            CV_Assert(ofs);     // check that new file is OK
+        }
+
+        // number of points
+        ofs << dstIDs.size() + 1 << " 0 ";
+
+        // output RGB
+        const KeyPoint &srcKP = matcher.allKeypoints[srcID.frameID][srcID.pointID];
+        Vec3b bgr = srcImg(cvRound(srcKP.pt.y), cvRound(srcKP.pt.x));
+        ofs << +bgr[2] << ' ' << +bgr[1] << ' ' << +bgr[0]; // unary + promotes char to int so it is printed numerically
+
+        // output source point coordinates + descriptor
+        printPointLocAndDesc(ofs, matcher, srcID, dstIDs);
+
+        // finish the line
+        ofs << endl;
+    }
+    ofs.close();
 
 	// display tracks
 	{
@@ -243,16 +296,16 @@ int main(int argc, char **argv)
 		Mat imgTracks[N];
 		for(int i=0; i<N; ++i) {
 			imgTracks[i] = stitched.rowRange(i*opts.ci.rows, (i+1)*opts.ci.rows);
-			CV_Assert(imgTracks[i].rows == imgsC[i].rows);
-			CV_Assert(imgTracks[i].cols == imgsC[i].cols);
-			CV_Assert(imgTracks[i].type() == imgsC[i].type());
+			CV_DbgAssert(imgTracks[i].rows == imgsC[i].rows);
+			CV_DbgAssert(imgTracks[i].cols == imgsC[i].cols);
+			CV_DbgAssert(imgTracks[i].type() == imgsC[i].type());
 			imgsC[i].copyTo(imgTracks[i]);
 		}
 
 		for(auto &track : rootTracks) {
 			if(track.second.size() < N) continue;
-			INFO(track.first.frameID);
-			INFO(track.first.pointID);
+//			INFO(track.first.frameID);
+//			INFO(track.first.pointID);
 			sort(track.second.begin(), track.second.end(), [&](const FeatureTrack::ID &a, const FeatureTrack::ID &b)
 					{ return a.frameID < b.frameID; });
 
@@ -262,7 +315,7 @@ int main(int argc, char **argv)
 			for(int j=0; j<N; ++j) {
 				const FeatureTrack::ID &id = track.second[j];
 				pts[j] = matcher.allKeypoints[id.frameID][id.pointID].pt;
-				INFO(pts[j]);
+//				INFO(pts[j]);
 				pts[j].y += j*opts.ci.rows;
 				circle(stitched, pts[j], 4, color);
 				if(j>0) {
@@ -288,6 +341,56 @@ void usage(int agrc, char** argv)
 {
 	cout << "Usage:" << endl
 			<< '\t' << argv[0] << " <options>.yaml" << endl << endl;
+}
+
+//////////////////////////////////////////////////
+// output points
+//////////////////////////////////////////////////
+static void printRow(ostream &out, InputArray descriptor, const int rowIdx)
+{
+    if(descriptor.type() == CV_8UC1) {
+        Mat1b row = (Mat1b) descriptor.getMat(rowIdx);
+        for(int i=0; i<row.cols; ++i) {
+            out << ' ' << +row(i);  // unary + promotes char to int so it is displayed numerically
+        }
+    } else if(descriptor.type() == CV_32FC1) {
+        Mat1f row = (Mat1f) descriptor.getMat(rowIdx);
+        for(int i=0; i<row.cols; ++i) {
+            out << ' ' << row(i);
+        }
+    } else {
+        CV_Error(cv::Error::StsNotImplemented, "this descriptor type is not supported");
+    }
+}
+
+static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const FeatureTrack::ID id,
+        const set<FeatureTrack::ID> &ids)
+{
+
+    // copy distorted coordinates of source point and destination points
+    const int n = ids.size() + 1;
+    Mat_<Vec2f> distorted(1,n), undistorted(1,n);
+    int i=0;
+    distorted(i++) = matcher.allKeypoints[id.frameID][id.pointID].pt;
+    for(const auto id : ids) {
+        distorted(i++) = matcher.allKeypoints[id.frameID][id.pointID].pt;
+    }
+    undistortPoints(distorted, undistorted, matcher.ci.K, matcher.ci.k, noArray(), matcher.ci.K);
+
+    const int camID = 0;
+    i=0;
+    out << ' ' << camID << ' ' << id.frameID
+        << ' ' << undistorted(i)[0] << ' ' << undistorted(i)[1]
+        << ' ' <<   distorted(i)[1] << ' ' <<   distorted(i)[1];
+    printRow(out, matcher.allDescriptors[id.frameID], id.pointID);
+    ++i;
+    for(const auto id : ids) {
+        out << ' ' << camID << ' ' << id.frameID
+            << ' ' << undistorted(i)[0] << ' ' << undistorted(i)[1]
+            << ' ' <<   distorted(i)[1] << ' ' <<   distorted(i)[1];
+        printRow(out, matcher.allDescriptors[id.frameID], id.pointID);
+        ++i;
+    }
 }
 
 
@@ -358,6 +461,8 @@ SfMMatcher SfMMatcher::create(const Options &opts)
     CV_Assert(opts.fs.isOpened());
 
 	SfMMatcher ret;
+
+	ret.ci = opts.ci;
 
 	if(opts.detector_same_as_extractor) {
 	    INFO(opts.detector_name);
@@ -476,22 +581,25 @@ void SfMMatcher::cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const
     }
 }
 
-void SfMMatcher::buildFeatureTracks()
+void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
 {
     // build feature tracks
     const int N = pairwiseMatches.size();
     tracks.clear();
+    match_adjacency_lists.clear();
     for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < i; ++j) {
+        for (int j = i+1; j < N; ++j) {
             for (const DMatch &m : pairwiseMatches[i][j]) {
                 const FeatureTrack::ID f1 = { i, m.queryIdx };
                 const FeatureTrack::ID f2 = { j, m.trainIdx };
                 tracks.makeSet(f1);
                 tracks.makeSet(f2);
                 tracks.merge(f1, f2);
+                match_adjacency_lists[f1].insert(f2);
             }
         }
     }
+    INFO(match_adjacency_lists.size());
 }
 
 //////////////////////////////////////////////////
