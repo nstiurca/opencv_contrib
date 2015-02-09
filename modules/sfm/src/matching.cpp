@@ -56,12 +56,13 @@ void getSymmetricMatches(const Ptr<DescriptorMatcher> &matcher,
 	}
 
 	// get 2 best matches from 1 to 2 and vice versa
-	vvDMatch matches_12_2nn, matches_21_2nn;
+	vvDMatch matches_12_2nn; // query 1, train 2
+	vvDMatch matches_21_2nn; // query 2, train 1
 	matcher->knnMatch(descriptors1, descriptors2, matches_12_2nn, 2);
 	matcher->knnMatch(descriptors2, descriptors1, matches_21_2nn, 2);
 
 	// prepare output
-	CV_Assert(matches_12_2nn.size() <= matches_21_2nn.size());
+	CV_DbgAssert(matches_12_2nn.size() <= matches_21_2nn.size());
 	const int Nmax = matches_12_2nn.size();
 	matches_12.clear(); matches_12.reserve(Nmax);
 	matches_21.clear(); matches_21.reserve(Nmax);
