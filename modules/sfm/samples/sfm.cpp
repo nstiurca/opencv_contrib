@@ -126,7 +126,7 @@ public:
 	void clear() { tracks.clear(); }
 
 	typedef unordered_map<FeatureTrack::ID, vector<FeatureTrack::ID>, IDHash> roots_t;
-	roots_t getRootTracks();
+	roots_t getRootTracks(bool limitSingleFeaturePerFrame);
 
 private:
 	unordered_map<ID, Node, IDHash> tracks;
@@ -149,6 +149,8 @@ struct SfMMatcher
 	Ptr<DescriptorMatcher> matcher;
 
 	vvKeyPoint allKeypoints;
+    vector<Mat2f> distortedKPcoords;
+    vector<Mat2f> undistortedKPcoords;
 	vUMat allDescriptors;
 	vDescriptorMatcher allMatchers;
 
@@ -160,6 +162,9 @@ struct SfMMatcher
 	FeatureTrack tracks;
 
 	void detectAndComputeKeypoints( const vUMat &images );
+	void cvvPlotKeypoints(InputArrayOfArrays _imgs,
+	        const Scalar &color=Scalar::all(-1), int flags=DrawMatchesFlags::DRAW_RICH_KEYPOINTS) const;
+	void trainMatchers();
 	void computePairwiseSymmetricMatches(const double match_ratio);
 	void cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const;
 	void buildAdjacencyListsAndFeatureTracks();
@@ -176,6 +181,7 @@ ostream& operator<<(ostream &out, const PoseWithVel &odo);
 istream& operator>>(istream &in, PoseWithVel &odo);
 ostream& operator<<(ostream &out, const Options &o);
 
+static void printPointLoc(ostream &out, const SfMMatcher &matcher, const FeatureTrack::ID id);
 static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const FeatureTrack::ID id,
         const set<FeatureTrack::ID> &ids);
 
@@ -239,6 +245,8 @@ int main(int argc, char **argv)
 
 	// get keypoints
 	matcher.detectAndComputeKeypoints(imgsG);
+	matcher.cvvPlotKeypoints(imgsC);
+	matcher.trainMatchers();
 
 	// do pairwise, symmetric matching over all image pairs
 	matcher.computePairwiseSymmetricMatches(opts.match_ratio);
@@ -246,7 +254,7 @@ int main(int argc, char **argv)
 
 	// build feature tracks
 	matcher.buildAdjacencyListsAndFeatureTracks();
-	FeatureTrack::roots_t rootTracks = matcher.tracks.getRootTracks();
+	FeatureTrack::roots_t rootTracks = matcher.tracks.getRootTracks(true);
 	INFO(rootTracks.size());
 
     // write pairwise matches to output files
@@ -270,11 +278,13 @@ int main(int argc, char **argv)
             INFO(fname);
             CV_Assert(ofs);     // check that the previous file was OK
             ofs.close();        // close previous file
-            ofs.open(fname);    // TODO: check file is ready for opening?
+            ofs.open(fname);    // TODO: check ofs is ready for opening?
             CV_Assert(ofs);     // check that new file is OK
         }
 
-        // number of points
+        // number of points (+1 for srcID)
+        // the 0 is the featureID in HyunSoo's Matching program which is always set to 0 in file
+        // SIFT_LOWES_Fisheye_FLANN.cpp:273
         ofs << dstIDs.size() + 1 << " 0 ";
 
         // output RGB
@@ -288,12 +298,41 @@ int main(int argc, char **argv)
         // finish the line
         ofs << endl;
     }
+    CV_Assert(ofs);
+    ofs.close();
+
+    // write tracks to output file
+    ofs.open(opts.data_dir + "reconstruction/stitchedmeasurement_static.txt");
+    CV_Assert(ofs);
+    i = 0;
+    for(const auto &rootTracksIt : rootTracks) {
+        const auto &track = rootTracksIt.second;
+//        DEBUG(track.size());
+        CV_DbgAssert((int)track.size() >= 2);
+        CV_DbgAssert((int)track.size() <= N);
+        ofs << track.size() << ' ' << i++;
+
+
+
+        // output RGB
+        const KeyPoint &srcKP = matcher.allKeypoints[track[0].frameID][track[0].pointID];
+        Mat3b img = (Mat3b)imgsC[track[0].frameID].getMat(ACCESS_READ);
+        Vec3b bgr = img(cvRound(srcKP.pt.y), cvRound(srcKP.pt.x));
+        ofs << ' ' << +bgr[2] << ' ' << +bgr[1] << ' ' << +bgr[0]; // unary + promotes char to int so it is printed numerically
+
+        for(const FeatureTrack::ID id : track) {
+            printPointLoc(ofs, matcher, id);
+        }
+
+        ofs << endl;
+    }
+    CV_Assert(ofs);
     ofs.close();
 
 	// display tracks
 	{
 		Mat stitched(opts.ci.rows * N, opts.ci.cols, imgsC[0].type());
-		Mat imgTracks[N];
+		vMat imgTracks(N);
 		for(int i=0; i<N; ++i) {
 			imgTracks[i] = stitched.rowRange(i*opts.ci.rows, (i+1)*opts.ci.rows);
 			CV_DbgAssert(imgTracks[i].rows == imgsC[i].rows);
@@ -303,13 +342,12 @@ int main(int argc, char **argv)
 		}
 
 		for(auto &track : rootTracks) {
-			if(track.second.size() < N) continue;
+			if((int)track.second.size() < N) continue;
 //			INFO(track.first.frameID);
 //			INFO(track.first.pointID);
-			sort(track.second.begin(), track.second.end(), [&](const FeatureTrack::ID &a, const FeatureTrack::ID &b)
-					{ return a.frameID < b.frameID; });
+			sort(track.second.begin(), track.second.end());
 
-			Point pts[N];
+			vPoint pts(N);
 			Matx41d c = Scalar::randu(0, 255);
 			Scalar color(c.val[0], c.val[1], c.val[2]);
 			for(int j=0; j<N; ++j) {
@@ -322,7 +360,7 @@ int main(int argc, char **argv)
 					arrowedLine(stitched, pts[j-1], pts[j], color);
 				}
 			}
-			const Point * const pts_ = pts;
+			const Point * const pts_ = pts.data();
 		}
 
 		cvv::showImage(stitched, CVVISUAL_LOCATION, "stitched tracks");
@@ -363,33 +401,25 @@ static void printRow(ostream &out, InputArray descriptor, const int rowIdx)
     }
 }
 
+static void printPointLoc(ostream &out, const SfMMatcher &matcher, const FeatureTrack::ID id)
+{
+    const int camID = 0;
+    out << ' ' << camID << ' ' << id.frameID
+        << ' ' << matcher.undistortedKPcoords[id.frameID](id.pointID)[0]
+        << ' ' << matcher.undistortedKPcoords[id.frameID](id.pointID)[1]
+        << ' ' << matcher.  distortedKPcoords[id.frameID](id.pointID)[0]
+        << ' ' << matcher.  distortedKPcoords[id.frameID](id.pointID)[1];
+}
+
 static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const FeatureTrack::ID id,
         const set<FeatureTrack::ID> &ids)
 {
-
     // copy distorted coordinates of source point and destination points
-    const int n = ids.size() + 1;
-    Mat_<Vec2f> distorted(1,n), undistorted(1,n);
-    int i=0;
-    distorted(i++) = matcher.allKeypoints[id.frameID][id.pointID].pt;
-    for(const auto id : ids) {
-        distorted(i++) = matcher.allKeypoints[id.frameID][id.pointID].pt;
-    }
-    undistortPoints(distorted, undistorted, matcher.ci.K, matcher.ci.k, noArray(), matcher.ci.K);
-
-    const int camID = 0;
-    i=0;
-    out << ' ' << camID << ' ' << id.frameID
-        << ' ' << undistorted(i)[0] << ' ' << undistorted(i)[1]
-        << ' ' <<   distorted(i)[1] << ' ' <<   distorted(i)[1];
+    printPointLoc(out, matcher, id);
     printRow(out, matcher.allDescriptors[id.frameID], id.pointID);
-    ++i;
     for(const auto id : ids) {
-        out << ' ' << camID << ' ' << id.frameID
-            << ' ' << undistorted(i)[0] << ' ' << undistorted(i)[1]
-            << ' ' <<   distorted(i)[1] << ' ' <<   distorted(i)[1];
+        printPointLoc(out, matcher, id);
         printRow(out, matcher.allDescriptors[id.frameID], id.pointID);
-        ++i;
     }
 }
 
@@ -514,6 +544,8 @@ void SfMMatcher::detectAndComputeKeypoints( const vUMat &images )
 	const int N = images.size();
 	allKeypoints.resize(N);
 	allDescriptors.resize(N);
+    distortedKPcoords.resize(N);
+    undistortedKPcoords.resize(N);
 
 	InputArray emptymask = noArray();
 
@@ -526,9 +558,24 @@ void SfMMatcher::detectAndComputeKeypoints( const vUMat &images )
 			detector->detect(images[i], allKeypoints[i], emptymask);
 			extractor->compute(images[i], allKeypoints[i], allDescriptors[i]);
 		}
+		const int n = allKeypoints[i].size();
+		if(0 == n) {
+		    WARN(i);
+		    WARN_STR("no keypoints found");
+		    continue;
+		}
+		distortedKPcoords[i] = Mat2f(n,1,
+		        reinterpret_cast<Vec2f*>(&allKeypoints[i][0].pt), sizeof(KeyPoint));
+		undistortedKPcoords[i].create(n,1);
+	    undistortPoints(distortedKPcoords[i].clone(), undistortedKPcoords[i],
+	            ci.K, ci.k, noArray(), ci.K);
 
-		cvv::debugDMatch(images[i], allKeypoints[i], images[i], allKeypoints[i], vDMatch(), CVVISUAL_LOCATION, "keypoints");
 	}
+}
+
+void SfMMatcher::trainMatchers()
+{
+    WARN_STR("STUB");
 }
 
 void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
@@ -537,7 +584,7 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
     const int N = allDescriptors.size();
     pairwiseMatches.resize(N, vector<vDMatch>(N));
     for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < i; ++j) {
+        for (int j = i+1; j < N; ++j) {
             INFO(i);
             INFO(j);
 
@@ -602,6 +649,38 @@ void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
     INFO(match_adjacency_lists.size());
 }
 
+template <typename MAT>
+static void cvvPlotKeypointsImpl(const vector<MAT> &imgs, const vvKeyPoint &allKeypoints,
+        const Scalar &color, int flags)
+{
+    CV_Assert(allKeypoints.size() == imgs.size());
+    const int N = imgs.size();
+    MAT m;
+    char buf[80];
+    for(int i=0; i<N; ++i) {
+        drawKeypoints(imgs[i], allKeypoints[i], m, color, flags);
+        snprintf(buf, sizeof buf, "keypoints for image %i", i);
+        cvv::showImage(m, CVVISUAL_LOCATION, buf);
+    }
+}
+
+void SfMMatcher::cvvPlotKeypoints(InputArrayOfArrays _imgs,
+        const Scalar &color, int flags) const
+{
+    if(_imgs.isMatVector()) {
+        vMat imgs;
+        _imgs.getMatVector(imgs);
+        cvvPlotKeypointsImpl(imgs, allKeypoints, color, flags);
+    } else if(_imgs.isUMatVector()) {
+        vUMat imgs;
+        _imgs.getUMatVector(imgs);
+        cvvPlotKeypointsImpl(imgs, allKeypoints, color, flags);
+    } else {
+        CV_Error(Error::StsNotImplemented, "Unknown/unsupported array type");
+    }
+}
+
+
 //////////////////////////////////////////////////
 // FEATURE TRACKS
 //////////////////////////////////////////////////
@@ -650,12 +729,32 @@ FeatureTrack::ID FeatureTrack::findSet(const ID x)
 	return it->second.parent;
 }
 
-FeatureTrack::roots_t FeatureTrack::getRootTracks()
+FeatureTrack::roots_t FeatureTrack::getRootTracks(bool limitSingleFeaturePerFrame)
 {
 	roots_t rootSets;
 
 	for(auto &idNode : tracks) {
-		rootSets[findSet(idNode.first)].push_back(idNode.first);
+	    auto &rootSet = rootSets[findSet(idNode.first)];
+	    CV_DbgAssert(find(begin(rootSet), end(rootSet), idNode.first) == end(rootSet));
+	    rootSet.push_back(idNode.first);
+	}
+
+	if(limitSingleFeaturePerFrame) {
+	    auto it = rootSets.begin();
+	    while(it != rootSets.end()) {
+	        auto b = begin(it->second);
+	        auto e = end(it->second);
+	        sort(b, e);
+	        auto duplicateFrameIt = adjacent_find(b, e,
+	                [](const FeatureTrack::ID a, const FeatureTrack::ID b)
+	                {
+	                    return a.frameID == b.frameID;
+	                });
+	        auto itOld = it++;
+	        if(duplicateFrameIt != e) {
+	            rootSets.erase(itOld);
+	        }
+	    }
 	}
 
 	return rootSets;
