@@ -82,6 +82,12 @@ CV_EXPORTS void pruneAsymmetric(vDMatch &matches_i, vDMatch &matches_j);
 CV_EXPORTS void getSymmetricMatches(const Ptr<DescriptorMatcher> &matcher,
 		InputArray descriptors1, InputArray descriptors2,
 		CV_OUT vDMatch &matches_12, CV_OUT vDMatch &matches_21, double maxDistanceRatio);
-}
+
+/////////////////////////////////////////////////
+// Descriptor averaging
+/////////////////////////////////////////////////
+CV_EXPORTS void computeAverageDescriptor(cv::InputArrayOfArrays _descriptors, cv::OutputArray _average);
+
+} // namespace cv
 
 #endif //__OPENCV_SFM_LENLEN_HPP__

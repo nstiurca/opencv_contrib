@@ -176,6 +176,7 @@ struct SfMMatcher
 // Prototypes
 //////////////////////////////////////////////////
 void usage(int argc, char **argv);
+static void printRow(ostream &out, InputArray descriptor, const int rowIdx);
 
 ostream& operator<<(ostream &out, const PoseWithVel &odo);
 istream& operator>>(istream &in, PoseWithVel &odo);
@@ -301,7 +302,7 @@ int main(int argc, char **argv)
     CV_Assert(ofs);
     ofs.close();
 
-    // write tracks to output file
+    // write tracks (including average descriptors) to output file
     ofs.open(opts.data_dir + "reconstruction/stitchedmeasurement_static.txt");
     CV_Assert(ofs);
     i = 0;
@@ -310,9 +311,9 @@ int main(int argc, char **argv)
 //        DEBUG(track.size());
         CV_DbgAssert((int)track.size() >= 2);
         CV_DbgAssert((int)track.size() <= N);
+
+        // output track size and ID
         ofs << track.size() << ' ' << i++;
-
-
 
         // output RGB
         const KeyPoint &srcKP = matcher.allKeypoints[track[0].frameID][track[0].pointID];
@@ -320,9 +321,39 @@ int main(int argc, char **argv)
         Vec3b bgr = img(cvRound(srcKP.pt.y), cvRound(srcKP.pt.x));
         ofs << ' ' << +bgr[2] << ' ' << +bgr[1] << ' ' << +bgr[0]; // unary + promotes char to int so it is printed numerically
 
+        // output locations of points
         for(const FeatureTrack::ID id : track) {
             printPointLoc(ofs, matcher, id);
         }
+
+        // end the track
+        ofs << endl;
+    }
+    CV_Assert(ofs);
+    ofs.close();
+
+    // output the descriptors for each track
+    ofs.open(opts.data_dir + "reconstruction/descriptors.txt");
+    CV_Assert(ofs);
+    i = 0;
+    const int descType = (matcher.feature2d ? matcher.feature2d : matcher.extractor)->descriptorType();
+    const int descSize = (matcher.feature2d ? matcher.feature2d : matcher.extractor)->descriptorSize();
+    Mat averageDescriptor(1, descSize, descType);
+    for(const auto &rootTracksIt : rootTracks) {
+        const auto &track = rootTracksIt.second;
+
+        // output the track ID
+        ofs << i++ << " 1";     // not sure what the 1 is for, but Hyun Soo's code outputs it
+
+        // compute average descriptor for track
+        const int n = track.size();
+        Mat trackDescriptors(n, descSize, descType);
+        for(int j=0; j<n; ++j) {
+            matcher.allDescriptors[track[j].frameID].row(track[j].pointID).copyTo(trackDescriptors.row(j));
+        }
+        computeAverageDescriptor(trackDescriptors, averageDescriptor);
+        DEBUG(averageDescriptor);
+        printRow(ofs, averageDescriptor, 0);
 
         ofs << endl;
     }
