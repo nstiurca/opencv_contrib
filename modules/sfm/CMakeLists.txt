@@ -14,6 +14,7 @@ endif()
 if (HAVE_opencv_cvv)
   ocv_include_directories("${OPENCV_MODULE_opencv_cvv_LOCATION}/include")
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DCVVISUAL_DEBUGMODE")
+  add_definitions(-DHAVE_cvv)
 endif()
 # we need C++11 and want warnings:
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Wextra -pedantic")

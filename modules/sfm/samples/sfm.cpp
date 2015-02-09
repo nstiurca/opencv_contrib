@@ -16,7 +16,9 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#ifdef HAVE_cvv
 #include <opencv2/cvv.hpp>
+#endif
 #include <opencv2/sfm.hpp>
 #include "logging.h"
 using namespace std;
@@ -238,7 +240,9 @@ int main(int argc, char **argv)
 		CV_Assert(imgsC[i].rows == opts.ci.rows);
 		CV_Assert(imgsC[i].cols == opts.ci.cols);
 
+#ifdef HAVE_cvv
 		cvv::showImage(imgsC[i], CVVISUAL_LOCATION, imgNames[i].c_str());
+#endif
 	}
 
 	// create SfM matcher
@@ -394,11 +398,15 @@ int main(int argc, char **argv)
 			const Point * const pts_ = pts.data();
 		}
 
+#ifdef HAVE_cvv
 		cvv::showImage(stitched, CVVISUAL_LOCATION, "stitched tracks");
+#endif
 	}
 
+#ifdef HAVE_cvv
 	// cvv needs this
 	cvv::finalShow();
+#endif
 
 	return 0;
 }
@@ -627,6 +635,7 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
     }
 }
 
+#ifdef HAVE_cvv
 template <typename MAT>
 static void cvvVisualizePairwiseMatchesImpl(const vector<MAT> &imgs,
         const vvKeyPoint &allKeypoints, const vector<vector<vDMatch>> &pairwiseMatches)
@@ -643,9 +652,11 @@ static void cvvVisualizePairwiseMatchesImpl(const vector<MAT> &imgs,
         }
     }
 }
+#endif // HAVE_cvv
 
 void SfMMatcher::cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const
 {
+#ifdef HAVE_cvv
     if(_imgs.isMatVector()) {
         vMat imgs;
         _imgs.getMatVector(imgs);
@@ -657,6 +668,9 @@ void SfMMatcher::cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const
     } else {
         CV_Error(Error::StsNotImplemented, "Unknown/unsupported array type");
     }
+#else   // !defined(HAVE_cvv)
+    WARN_STR("STUB: CVV is not available");
+#endif  // ifdef HAVE_cvv
 }
 
 void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
@@ -680,6 +694,7 @@ void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
     INFO(match_adjacency_lists.size());
 }
 
+#ifdef HAVE_cvv
 template <typename MAT>
 static void cvvPlotKeypointsImpl(const vector<MAT> &imgs, const vvKeyPoint &allKeypoints,
         const Scalar &color, int flags)
@@ -694,10 +709,12 @@ static void cvvPlotKeypointsImpl(const vector<MAT> &imgs, const vvKeyPoint &allK
         cvv::showImage(m, CVVISUAL_LOCATION, buf);
     }
 }
+#endif // HAVE_cvv
 
 void SfMMatcher::cvvPlotKeypoints(InputArrayOfArrays _imgs,
         const Scalar &color, int flags) const
 {
+#ifdef HAVE_cvv
     if(_imgs.isMatVector()) {
         vMat imgs;
         _imgs.getMatVector(imgs);
@@ -709,6 +726,9 @@ void SfMMatcher::cvvPlotKeypoints(InputArrayOfArrays _imgs,
     } else {
         CV_Error(Error::StsNotImplemented, "Unknown/unsupported array type");
     }
+#else
+    WARN_STR("STUB: CVV is not available");
+#endif
 }
 
 
