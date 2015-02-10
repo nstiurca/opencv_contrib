@@ -81,7 +81,10 @@ CV_EXPORTS vDMatch pruneUnmatched(const vvDMatch &allMatches, const double maxDi
 CV_EXPORTS void pruneAsymmetric(vDMatch &matches_i, vDMatch &matches_j);
 CV_EXPORTS void getSymmetricMatches(const Ptr<DescriptorMatcher> &matcher,
 		InputArray descriptors1, InputArray descriptors2,
-		CV_OUT vDMatch &matches_12, CV_OUT vDMatch &matches_21, double maxDistanceRatio);
+		CV_OUT vDMatch &matches_12, CV_OUT vDMatch &matches_21, const double maxDistanceRatio);
+CV_EXPORTS void getSymmetricMatches(const Ptr<DescriptorMatcher> &matcher1, const Ptr<DescriptorMatcher> &matcher2,
+        InputArray descriptors1, InputArray descriptors2,
+        CV_OUT vDMatch &matches_12, CV_OUT vDMatch &matches_21, const double maxDistanceRatio);
 
 /////////////////////////////////////////////////
 // Descriptor averaging
