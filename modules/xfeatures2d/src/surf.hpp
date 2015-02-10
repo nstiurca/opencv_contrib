@@ -19,9 +19,9 @@ class SURF_Impl : public SURF
 {
 public:
     //! the full constructor taking all the necessary parameters
-    explicit CV_WRAP SURF_Impl(double hessianThreshold,
-                               int nOctaves = 4, int nOctaveLayers = 2,
-                               bool extended = true, bool upright = false);
+    explicit CV_WRAP SURF_Impl(double hessianThreshold=100,
+                               int nOctaves = 4, int nOctaveLayers = 3,
+                               bool extended = false, bool upright = false);
 
     //! returns the descriptor size in float's (64 or 128)
     CV_WRAP int descriptorSize() const;
@@ -56,6 +56,8 @@ public:
 
     void setUpright(bool upright_) { upright = upright_; }
     bool getUpright() const { return upright; }
+
+    virtual AlgorithmInfo* info() const;
 
     double hessianThreshold;
     int nOctaves;

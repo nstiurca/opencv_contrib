@@ -61,6 +61,8 @@ namespace cv
 namespace xfeatures2d
 {
 
+CV_EXPORTS bool initModule_xfeatures2d();
+
 //! @addtogroup xfeatures2d_experiment
 //! @{
 
