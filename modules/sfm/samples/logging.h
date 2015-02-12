@@ -9,22 +9,36 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <vector>
+#include <set>
 
-template<class T>
-std::ostream& operator<<(std::ostream &out, const std::vector<T> &iter)
+template<class Container>
+std::ostream& printContainer(std::ostream &out, const Container &container, const char s, const char e)
 {
-  typename std::vector<T>::const_iterator it = iter.begin();
-  typename std::vector<T>::const_iterator end = iter.end();
+  typename Container::const_iterator it  = container.begin();
+  typename Container::const_iterator end = container.end();
 
-  if(it == end) return out << '[' << ']'; //"[]";
+  if(it == end) return out << s << e; //"[]";
 
-  out << '[' << *it++;
+  out << s << *it++;
 
   while(it != end) {
     out << ',' << ' ' << /*", " <<*/ *it++;
   }
 
-  return out << ']';
+  return out << e;
+}
+
+template<typename T>
+std::ostream& operator<<(std::ostream &out, const std::vector<T> &vec)
+{
+    return printContainer(out, vec, '[', ']');
+}
+
+template<typename T>
+std::ostream& operator<<(std::ostream &out, const std::set<T> &set)
+{
+    return printContainer(out, set, '{', '}');
 }
 
 #define HAVE_EXCEPTIONS 1
