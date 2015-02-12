@@ -9,6 +9,7 @@ ocv_include_modules(${OPENCV_SFM_REQUIRED_DEPS})
 
 if (HAVE_opencv_xfeatures2d)
   ocv_include_directories("${OPENCV_MODULE_opencv_xfeatures2d_LOCATION}/include")
+  add_definitions(-DHAVE_xfeatures2d)
 endif()
 
 if (HAVE_opencv_cvv)

@@ -2,8 +2,10 @@
 // INCLUDES
 //////////////////////////////////////////////////
 
+#include <algorithm>
 #include <forward_list>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iomanip>
 #include <memory>
@@ -16,6 +18,10 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/features2d.hpp>
+#ifdef HAVE_xfeatures2d
+#include <opencv2/xfeatures2d.hpp>
+#endif
 #ifdef HAVE_cvv
 #include <opencv2/cvv.hpp>
 #endif
@@ -74,6 +80,7 @@ struct Options
 	// Where is the data?
 	string data_dir;
 	string imgs_glob;
+	string reconstruction_dir;
 	int begin_idx;
 	int end_idx;
 
@@ -93,53 +100,36 @@ struct Options
 	static Options create(const String &optionsFname);
 };
 
-class FeatureTrack
-{
-public:
-	struct ID
-	{
-		short frameID;
-		short pointID;
-	};
-
-	struct IDHash
-	{
-		size_t operator()(const FeatureTrack::ID &f) const
-		{
-//			hash<uint32_t> h;
-//			return h(f.frameID) ^ h(-f.pointID);
-			return hash<uint32_t>()((((uint32_t)f.frameID) << 16) | (uint32_t)f.pointID);
-		}
-	};
-
-	struct Node
-	{
-		ID parent;
-		short rank;
-
-		explicit Node(ID id) : parent(id), rank(0) {}
-	};
-
-	void makeSet(const ID id);
-	void merge(const ID x, const ID y);
-	void link(const ID x, const ID y);
-	ID findSet(const ID x);
-
-	void clear() { tracks.clear(); }
-
-	typedef unordered_map<FeatureTrack::ID, vector<FeatureTrack::ID>, IDHash> roots_t;
-	roots_t getRootTracks(bool limitSingleFeaturePerFrame);
-
-private:
-	unordered_map<ID, Node, IDHash> tracks;
-}; // class FeatureTrack
-
-bool operator==(const FeatureTrack::ID &a, const FeatureTrack::ID &b)
-		{ return a.frameID == b.frameID && a.pointID == b.pointID; }
-bool operator<(const FeatureTrack::ID &a, const FeatureTrack::ID &b)
-{ return a.frameID == b.frameID ? a.pointID < b.pointID : a.frameID < b.frameID; }
-bool operator!=(const FeatureTrack::ID &a, const FeatureTrack::ID &b)
-		{ return !(a == b); }
+//namespace std
+//{
+//extern template<>
+//struct hash<::cv::ID>;
+//}
+//
+//class FeatureTrack
+//{
+//public:
+//	struct Node
+//	{
+//		ID parent;
+//		short rank;
+//
+//		explicit Node(ID id) : parent(id), rank(0) {}
+//	};
+//
+//	void makeSet(const ID id);
+//	void merge(const ID x, const ID y);
+//	void link(const ID x, const ID y);
+//	ID findSet(const ID x);
+//
+//	void clear() { tracks.clear(); }
+//
+//	typedef unordered_map<ID, vector<ID>> roots_t;
+//	roots_t getRootTracks(bool limitSingleFeaturePerFrame);
+//
+//private:
+//	unordered_map<ID, Node> tracks;
+//}; // class FeatureTrack
 
 struct SfMMatcher
 {
@@ -148,7 +138,8 @@ struct SfMMatcher
 	Ptr<FeatureDetector> detector;
 	Ptr<DescriptorExtractor> extractor;
 	Ptr<Feature2D> feature2d;
-	Ptr<DescriptorMatcher> matcher;
+	Ptr<DescriptorMatcher> matcherTemplate;
+	vector<Ptr<DescriptorMatcher>> matchers;
 
 	vvKeyPoint allKeypoints;
     vector<Mat2f> distortedKPcoords;
@@ -158,10 +149,11 @@ struct SfMMatcher
 
 	vector<vector<vDMatch>> pairwiseMatches;
 
-	typedef map<FeatureTrack::ID, set<FeatureTrack::ID>> match_adjacency_lists_t;
+	typedef map<ID, set<ID>> match_adjacency_lists_t;
 	match_adjacency_lists_t match_adjacency_lists;
 
-	FeatureTrack tracks;
+//	FeatureTrack tracks;
+	Ptr<Tracks> tracks;
 
 	void detectAndComputeKeypoints( const vUMat &images );
 	void cvvPlotKeypoints(InputArrayOfArrays _imgs,
@@ -169,7 +161,9 @@ struct SfMMatcher
 	void trainMatchers();
 	void computePairwiseSymmetricMatches(const double match_ratio);
 	void cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const;
-	void buildAdjacencyListsAndFeatureTracks();
+//    void buildAdjacencyListsAndFeatureTracks_old();
+    void buildAdjacencyListsAndFeatureTracks();
+    void getTracks(vvID &tracks);
 
 	static SfMMatcher create(const Options &opts);
 };
@@ -177,22 +171,28 @@ struct SfMMatcher
 //////////////////////////////////////////////////
 // Prototypes
 //////////////////////////////////////////////////
-void usage(int argc, char **argv);
+static void usage(int argc, char **argv);
 static void printRow(ostream &out, InputArray descriptor, const int rowIdx);
 
-ostream& operator<<(ostream &out, const PoseWithVel &odo);
-istream& operator>>(istream &in, PoseWithVel &odo);
-ostream& operator<<(ostream &out, const Options &o);
+static ostream& operator<<(ostream &out, const PoseWithVel &odo);
+static istream& operator>>(istream &in, PoseWithVel &odo);
+static ostream& operator<<(ostream &out, const Options &o);
+static ostream& operator<<(ostream &out, const ID &id);
 
-static void printPointLoc(ostream &out, const SfMMatcher &matcher, const FeatureTrack::ID id);
-static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const FeatureTrack::ID id,
-        const set<FeatureTrack::ID> &ids);
+static void printPointLoc(ostream &out, const SfMMatcher &matcher, const ID id);
+static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const ID id,
+        const set<ID> &ids);
 
 //////////////////////////////////////////////////
 // Init modules
 //////////////////////////////////////////////////
-bool haveFeatures2d = initModule_features2d();
-//bool havexFeatures2d = initModule_xfeatures2d();
+const bool haveFeatures2d = initModule_features2d();
+const bool havexFeatures2d =
+#ifdef HAVE_xfeatures2d
+    xfeatures2d::initModule_xfeatures2d();
+#else
+    false;
+#endif
 bool haveSfm = initModule_sfm();
 
 //////////////////////////////////////////////////
@@ -201,7 +201,7 @@ bool haveSfm = initModule_sfm();
 int main(int argc, char **argv)
 {
 	// args?
-	if(2 != argc) {
+	if(2 > argc) {
 		usage(argc, argv);
 		exit(-1);
 	}
@@ -259,19 +259,22 @@ int main(int argc, char **argv)
 
 	// build feature tracks
 	matcher.buildAdjacencyListsAndFeatureTracks();
-	FeatureTrack::roots_t rootTracks = matcher.tracks.getRootTracks(true);
-	INFO(rootTracks.size());
+	vvID tracks;
+	matcher.getTracks(tracks);
+	INFO(tracks.size());
+//	FeatureTrack::roots_t rootTracks = matcher.tracks.getRootTracks(true);
+//	INFO(rootTracks.size());
 
     // write pairwise matches to output files
     char fname[256] = {0};
-    const string fnameFmt = opts.data_dir + "reconstruction/static_measurement_desc%07d.txt";
-//  boost::filesystem::create_directory(opts.data_dir + "reconstruction");
+    const string fnameFmt = opts.reconstruction_dir + "/static_measurement_desc%07d.txt";
+//  boost::filesystem::create_directory(opts.reconstruction_dir);
     int i = -1;
     Mat3b srcImg;
     ofstream ofs;
     INFO(matcher.match_adjacency_lists.size());
     for(const auto &it : matcher.match_adjacency_lists) {
-        const FeatureTrack::ID srcID = it.first;
+        const ID srcID = it.first;
         const auto &dstIDs = it.second;
 
         CV_DbgAssert(srcID.frameID >= i);
@@ -307,12 +310,24 @@ int main(int argc, char **argv)
     ofs.close();
 
     // write tracks (including average descriptors) to output file
-    ofs.open(opts.data_dir + "reconstruction/stitchedmeasurement_static.txt");
+    ofs.open(opts.reconstruction_dir + "/stitchedmeasurement_static.txt");
     CV_Assert(ofs);
     i = 0;
-    for(const auto &rootTracksIt : rootTracks) {
-        const auto &track = rootTracksIt.second;
+    int smallTracks = 0;
+    int bigTracks = 0;
+    INFO(tracks.size());
+    for(const auto &track : tracks) {
 //        DEBUG(track.size());
+//        DEBUG(track);
+        if(track.size() < 2) {
+            ++smallTracks;
+            WARN(track.size());
+            continue;
+        } else if((int)track.size() > N) {
+            ++bigTracks;
+            WARN(track.size());
+            continue;
+        }
         CV_DbgAssert((int)track.size() >= 2);
         CV_DbgAssert((int)track.size() <= N);
 
@@ -326,7 +341,7 @@ int main(int argc, char **argv)
         ofs << ' ' << +bgr[2] << ' ' << +bgr[1] << ' ' << +bgr[0]; // unary + promotes char to int so it is printed numerically
 
         // output locations of points
-        for(const FeatureTrack::ID id : track) {
+        for(const ID id : track) {
             printPointLoc(ofs, matcher, id);
         }
 
@@ -335,17 +350,17 @@ int main(int argc, char **argv)
     }
     CV_Assert(ofs);
     ofs.close();
+    INFO(smallTracks);
+    INFO(bigTracks);
 
     // output the descriptors for each track
-    ofs.open(opts.data_dir + "reconstruction/descriptors.txt");
+    ofs.open(opts.reconstruction_dir + "/descriptors.txt");
     CV_Assert(ofs);
     i = 0;
     const int descType = (matcher.feature2d ? matcher.feature2d : matcher.extractor)->descriptorType();
     const int descSize = (matcher.feature2d ? matcher.feature2d : matcher.extractor)->descriptorSize();
     Mat averageDescriptor(1, descSize, descType);
-    for(const auto &rootTracksIt : rootTracks) {
-        const auto &track = rootTracksIt.second;
-
+    for(const auto &track : tracks) {
         // output the track ID
         ofs << i++ << " 1";     // not sure what the 1 is for, but Hyun Soo's code outputs it
 
@@ -356,10 +371,15 @@ int main(int argc, char **argv)
             matcher.allDescriptors[track[j].frameID].row(track[j].pointID).copyTo(trackDescriptors.row(j));
         }
         computeAverageDescriptor(trackDescriptors, averageDescriptor);
-        DEBUG(averageDescriptor);
+//        DEBUG(averageDescriptor);
         printRow(ofs, averageDescriptor, 0);
 
         ofs << endl;
+
+        if(i%300 == 0) {
+            printf("Finished writing descriptor % 6i / % 6i (%.1f%%)\n",
+                    i, (int)tracks.size(), i*100.0/tracks.size());
+        }
     }
     CV_Assert(ofs);
     ofs.close();
@@ -376,17 +396,17 @@ int main(int argc, char **argv)
 			imgsC[i].copyTo(imgTracks[i]);
 		}
 
-		for(auto &track : rootTracks) {
-			if((int)track.second.size() < N) continue;
+		for(auto &track : tracks) {
+			if((int)track.size() < N) continue;
 //			INFO(track.first.frameID);
 //			INFO(track.first.pointID);
-			sort(track.second.begin(), track.second.end());
+			sort(track.begin(), track.end());
 
 			vPoint pts(N);
 			Matx41d c = Scalar::randu(0, 255);
 			Scalar color(c.val[0], c.val[1], c.val[2]);
 			for(int j=0; j<N; ++j) {
-				const FeatureTrack::ID &id = track.second[j];
+				const ID &id = track[j];
 				pts[j] = matcher.allKeypoints[id.frameID][id.pointID].pt;
 //				INFO(pts[j]);
 				pts[j].y += j*opts.ci.rows;
@@ -395,7 +415,6 @@ int main(int argc, char **argv)
 					arrowedLine(stitched, pts[j-1], pts[j], color);
 				}
 			}
-			const Point * const pts_ = pts.data();
 		}
 
 #ifdef HAVE_cvv
@@ -440,7 +459,7 @@ static void printRow(ostream &out, InputArray descriptor, const int rowIdx)
     }
 }
 
-static void printPointLoc(ostream &out, const SfMMatcher &matcher, const FeatureTrack::ID id)
+static void printPointLoc(ostream &out, const SfMMatcher &matcher, const ID id)
 {
     const int camID = 0;
     out << ' ' << camID << ' ' << id.frameID
@@ -450,8 +469,8 @@ static void printPointLoc(ostream &out, const SfMMatcher &matcher, const Feature
         << ' ' << matcher.  distortedKPcoords[id.frameID](id.pointID)[1];
 }
 
-static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const FeatureTrack::ID id,
-        const set<FeatureTrack::ID> &ids)
+static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const ID id,
+        const set<ID> &ids)
 {
     // copy distorted coordinates of source point and destination points
     printPointLoc(out, matcher, id);
@@ -485,21 +504,25 @@ Options Options::create(const String &optionsFname)
 	ret.begin_idx = (int)fs["begin_idx"];
 	ret.end_idx = (int)fs["end_idx"];
 
+	string calib_fname = ret.data_dir + (string)fs["calib_fname"];
+	INFO(calib_fname);
+	FileStorage calibFS(calib_fname, FileStorage::READ|FileStorage::FORMAT_YAML);
 	ret.ci.K  <<
-			(double)fs["Fx"], 0.0, (double)fs["Px"],
-			0.0, (double)fs["Fy"], (double)fs["Py"],
+			(double)calibFS["Fx"], 0.0, (double)calibFS["Px"],
+			0.0, (double)calibFS["Fy"], (double)calibFS["Py"],
 			0.0, 0.0, 1.0;
 	ret.ci.k  <<
-			(double)fs["k1"],
-			(double)fs["k2"],
-			(double)fs["k3"],
-			(double)fs["k4"],
-			(double)fs["k5"];
-	ret.ci.rows = (int)fs["ImageH"];
-	ret.ci.cols = (int)fs["ImageW"];
+			(double)calibFS["k1"],
+			(double)calibFS["k2"],
+			(double)calibFS["k3"],
+			(double)calibFS["k4"],
+			(double)calibFS["k5"];
+	ret.ci.rows = (int)calibFS["ImageH"];
+	ret.ci.cols = (int)calibFS["ImageW"];
 
 	ret.detector_options = fs["detector"];
 	ret.detector_name = (String)ret.detector_options["name"];
+    ret.reconstruction_dir = ret.data_dir + "/reconstruction-" + ret.detector_name;
 
 	ret.extractor_options = fs["extractor"];
 	if(ret.extractor_options.isMap()) {
@@ -547,13 +570,13 @@ SfMMatcher SfMMatcher::create(const Options &opts)
 	}
 
 	INFO(opts.matcher_name);
-	ret.matcher = DescriptorMatcher::create(opts.matcher_name);
-	ret.matcher->read(opts.matcher_options);
+	ret.matcherTemplate = DescriptorMatcher::create(opts.matcher_name);
+	ret.matcherTemplate->read(opts.matcher_options);
 
 	DEBUG(ret.detector.get());
 	DEBUG(ret.extractor.get());
 	DEBUG(ret.feature2d.get());
-	DEBUG(ret.matcher.get());
+	DEBUG(ret.matcherTemplate.get());
 
 	CV_Assert((ret.detector.empty() && ret.extractor.empty())
 			^ ret.feature2d.empty());
@@ -573,7 +596,7 @@ SfMMatcher SfMMatcher::create(const Options &opts)
 		}
 	}
 
-	CV_Assert(!ret.matcher.empty());
+	CV_Assert(!ret.matcherTemplate.empty());
 
 	return ret;
 }
@@ -608,13 +631,19 @@ void SfMMatcher::detectAndComputeKeypoints( const vUMat &images )
 		undistortedKPcoords[i].create(n,1);
 	    undistortPoints(distortedKPcoords[i].clone(), undistortedKPcoords[i],
 	            ci.K, ci.k, noArray(), ci.K);
-
+	    printf("Image % 4i / %i (%.1f%%). Found %i descriptors\n", i, N, 100.0 * i / N, n);
 	}
 }
 
 void SfMMatcher::trainMatchers()
 {
-    WARN_STR("STUB");
+    const int N = allDescriptors.size();
+    matchers.resize(N);
+    for(int i=0; i<N; ++i) {
+        matchers[i] = matcherTemplate->clone(true);
+        matchers[i]->add(allDescriptors[i]);
+        matchers[i]->train();
+    }
 }
 
 void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
@@ -622,12 +651,13 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
     // do pairwise, symmetric matching over all image pairs
     const int N = allDescriptors.size();
     pairwiseMatches.resize(N, vector<vDMatch>(N));
+    // TODO: make this parallel
     for (int i = 0; i < N; ++i) {
         for (int j = i+1; j < N; ++j) {
             INFO(i);
             INFO(j);
 
-            getSymmetricMatches(matcher, allDescriptors[i],
+            getSymmetricMatches(matchers[i], matchers[j], allDescriptors[i],
                     allDescriptors[j], pairwiseMatches[i][j],
                     pairwiseMatches[j][i], match_ratio);
             INFO(pairwiseMatches[i][j].size());
@@ -643,7 +673,8 @@ static void cvvVisualizePairwiseMatchesImpl(const vector<MAT> &imgs,
     const int N = imgs.size();
     char description[100];
     for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < i; ++j) {
+        const int jMax = N > 10 ? i : 1;
+        for (int j = 0; j < jMax; ++j) {
             snprintf(description, sizeof(description),
                     "symmetric matches %i  %i", i, j);
             cvv::debugDMatch(imgs[i], allKeypoints[i], imgs[j],
@@ -673,26 +704,120 @@ void SfMMatcher::cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const
 #endif  // ifdef HAVE_cvv
 }
 
+//void SfMMatcher::buildAdjacencyListsAndFeatureTracks_old()
+//{
+//    // build feature tracks
+//    const int N = pairwiseMatches.size();
+//    tracks.clear();
+//    match_adjacency_lists.clear();
+//    for (int i = 0; i < N; ++i) {
+//        for (int j = i+1; j < N; ++j) {
+//            for (const DMatch &m : pairwiseMatches[i][j]) {
+//                const ID f1 = { i, m.queryIdx };
+//                const ID f2 = { j, m.trainIdx };
+//                tracks.makeSet(f1);
+//                tracks.makeSet(f2);
+//                tracks.merge(f1, f2);
+//                match_adjacency_lists[f1].insert(f2);
+//            }
+//        }
+//    }
+//    INFO(match_adjacency_lists.size());
+//}
+
+
 void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
 {
-    // build feature tracks
     const int N = pairwiseMatches.size();
-    tracks.clear();
+
+    tracks = Tracks::create();
+    Tracks &t = *tracks;
     match_adjacency_lists.clear();
-    for (int i = 0; i < N; ++i) {
-        for (int j = i+1; j < N; ++j) {
-            for (const DMatch &m : pairwiseMatches[i][j]) {
-                const FeatureTrack::ID f1 = { i, m.queryIdx };
-                const FeatureTrack::ID f2 = { j, m.trainIdx };
-                tracks.makeSet(f1);
-                tracks.makeSet(f2);
-                tracks.merge(f1, f2);
+
+    for(int i=0; i<N; ++i) {
+        for(int j=i+1; j<N; ++j) {
+            for(const DMatch &m : pairwiseMatches[i][j]) {
+                const ID f1 = { i, m.queryIdx };
+                const ID f2 = { j, m.trainIdx };
                 match_adjacency_lists[f1].insert(f2);
-            }
-        }
-    }
+                if(t.isInSomeTrack(f2)) {
+                    if(t.isInSomeTrack(f1)) {
+                        if(t.rootID(f1) == t.rootID(f2)) {
+                            // same track already; do nothing
+                        } else {
+                            // f1 and f2 already in different tracks
+                            // TODO: merge tracks?!?!?
+                            if(t.canMerge(t.rootID(f1), t.rootID(f2))) {
+                                t.merge(t.rootID(f1), t.rootID(f2));
+                            } else {
+                                WARN_STR("STUB");
+                                WARN(i);
+                                WARN(j);
+                                WARN(f1);
+                                WARN(f2);
+                                WARN(t.track(f1));
+                                WARN(t.track(f2));
+                            }
+                        }
+                    } else {
+                        // add f1 to f2's track
+                        t.addToTrack(f1, f2);
+                    }
+                } else {
+                    // f2 has no parent/root, so add to a (possibly new) track
+                    if(t.isInSomeTrack(f1)) {
+                        // add f2 to f1's track
+                        t.addToTrack(f2, f1);
+                    } else {
+                        // new track of f1 and f2
+                        t.makeNewTrack(f1, f2);
+                    }
+                } // if(isInSomeTrack(f2) {} else {}
+            } // for(const DMatch &m : pairwiseMatches[i][j])
+        } // for(int j=i+1; j<N; ++j)
+    } // for(int i=0; i<N; ++i)
     INFO(match_adjacency_lists.size());
+} // void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
+
+static inline bool frameLess(const int a, const ID b)
+{
+    return a < b.frameID;
 }
+
+void SfMMatcher::getTracks(vvID &tracks_)
+{
+    tracks->getTracks(tracks_);
+
+    for(auto &track : tracks_) {
+        CV_DbgAssert(!track.empty());
+//        INFO(track.size());
+        auto r = track.begin();         // read iterator
+        auto w = r;                     // write iterator
+        const auto e = track.end();     // end iterator
+        CV_DbgAssert(is_sorted(r, e));
+        while(r!=e) {
+            const short i = r->frameID;
+            auto r2 = std::find_if_not(r+1, e, [=](const ID id) { return id.frameID == i; });
+            CV_DbgAssert(r2 - r > 0);
+            if(r2 - r > 1) {
+                // TODO: the elements [r, r2) have the same frameID. pick only 1 of them, discard the rest
+                *w++ = *std::max_element(r, r2, [&](const ID largest, const ID first) {
+                    CV_DbgAssert(largest.frameID == first.frameID);
+                    return allKeypoints[largest.frameID][largest.pointID].response
+                         < allKeypoints[largest.frameID][  first.pointID].response; });
+                r = r2;
+            } else {
+                CV_DbgAssert(r2 - r == 1);
+                // no other element has the same frameID, so just copy it;
+                *w++ = *r++;
+            }
+        } // while(r != e)
+        // done identifying duplicate points, but still need to discard them
+        CV_DbgAssert(w <= e);
+        DEBUG((track.size() - (w - track.begin())));
+        track.resize(w - track.begin());
+    } // for( track : tracks)
+} // void SfMMatcher::getTracks(vvID &tracks_
 
 #ifdef HAVE_cvv
 template <typename MAT>
@@ -732,84 +857,84 @@ void SfMMatcher::cvvPlotKeypoints(InputArrayOfArrays _imgs,
 }
 
 
-//////////////////////////////////////////////////
-// FEATURE TRACKS
-//////////////////////////////////////////////////
-void FeatureTrack::makeSet(const ID id)
-{
-	auto it = tracks.find(id);
-	if(tracks.end() != it) return;
-
-	tracks.emplace(piecewise_construct, make_tuple(id), make_tuple(id));
-//	tracks.emplace(make_pair(id, Node{id, 0}));
-}
-
-void FeatureTrack::merge(const ID x, const ID y)
-{
-	link(findSet(x), findSet(y));
-}
-
-void FeatureTrack::link(const ID x, const ID y)
-{
-	auto itX = tracks.find(x);
-	auto itY = tracks.find(y);
-
-	CV_Assert(tracks.end() != itX);
-	CV_Assert(tracks.end() != itY);
-
-	if(itX->second.rank > itY->second.rank) {
-		itY->second.parent = x;
-	} else {
-		itX->second.parent = y;
-		if(itX->second.rank == itY->second.rank) {
-			++itY->second.rank;
-		}
-	}
-}
-
-FeatureTrack::ID FeatureTrack::findSet(const ID x)
-{
-	auto it = tracks.find(x);
-
-	CV_Assert(tracks.end() != it);
-
-	if(x != it->second.parent) {
-		it->second.parent = findSet(it->second.parent);
-	}
-
-	return it->second.parent;
-}
-
-FeatureTrack::roots_t FeatureTrack::getRootTracks(bool limitSingleFeaturePerFrame)
-{
-	roots_t rootSets;
-
-	for(auto &idNode : tracks) {
-	    auto &rootSet = rootSets[findSet(idNode.first)];
-	    CV_DbgAssert(find(begin(rootSet), end(rootSet), idNode.first) == end(rootSet));
-	    rootSet.push_back(idNode.first);
-	}
-
-	if(limitSingleFeaturePerFrame) {
-	    auto it = rootSets.begin();
-	    while(it != rootSets.end()) {
-	        auto b = begin(it->second);
-	        auto e = end(it->second);
-	        sort(b, e);
-	        auto duplicateFrameIt = adjacent_find(b, e,
-	                [](const FeatureTrack::ID a, const FeatureTrack::ID b)
-	                {
-	                    return a.frameID == b.frameID;
-	                });
-	        auto itOld = it++;
-	        if(duplicateFrameIt != e) {
-	            rootSets.erase(itOld);
-	        }
-	    }
-	}
-
-	return rootSets;
-}
+////////////////////////////////////////////////////
+//// FEATURE TRACKS
+////////////////////////////////////////////////////
+//void FeatureTrack::makeSet(const ID id)
+//{
+//	auto it = tracks.find(id);
+//	if(tracks.end() != it) return;
+//
+//	tracks.emplace(piecewise_construct, make_tuple(id), make_tuple(id));
+////	tracks.emplace(make_pair(id, Node{id, 0}));
+//}
+//
+//void FeatureTrack::merge(const ID x, const ID y)
+//{
+//	link(findSet(x), findSet(y));
+//}
+//
+//void FeatureTrack::link(const ID x, const ID y)
+//{
+//	auto itX = tracks.find(x);
+//	auto itY = tracks.find(y);
+//
+//	CV_Assert(tracks.end() != itX);
+//	CV_Assert(tracks.end() != itY);
+//
+//	if(itX->second.rank > itY->second.rank) {
+//		itY->second.parent = x;
+//	} else {
+//		itX->second.parent = y;
+//		if(itX->second.rank == itY->second.rank) {
+//			++itY->second.rank;
+//		}
+//	}
+//}
+//
+//ID FeatureTrack::findSet(const ID x)
+//{
+//	auto it = tracks.find(x);
+//
+//	CV_Assert(tracks.end() != it);
+//
+//	if(x != it->second.parent) {
+//		it->second.parent = findSet(it->second.parent);
+//	}
+//
+//	return it->second.parent;
+//}
+//
+//FeatureTrack::roots_t FeatureTrack::getRootTracks(bool limitSingleFeaturePerFrame)
+//{
+//	roots_t rootSets;
+//
+//	for(auto &idNode : tracks) {
+//	    auto &rootSet = rootSets[findSet(idNode.first)];
+//	    CV_DbgAssert(find(begin(rootSet), end(rootSet), idNode.first) == end(rootSet));
+//	    rootSet.push_back(idNode.first);
+//	}
+//
+//	if(limitSingleFeaturePerFrame) {
+//	    auto it = rootSets.begin();
+//	    while(it != rootSets.end()) {
+//	        auto b = begin(it->second);
+//	        auto e = end(it->second);
+//	        sort(b, e);
+//	        auto duplicateFrameIt = adjacent_find(b, e,
+//	                [](const ID a, const ID b)
+//	                {
+//	                    return a.frameID == b.frameID;
+//	                });
+//	        auto itOld = it++;
+//	        if(duplicateFrameIt != e) {
+//	            rootSets.erase(itOld);
+//	        }
+//	    }
+//	}
+//
+//	return rootSets;
+//}
 
 //////////////////////////////////////////////////
 // I/O
@@ -855,6 +980,7 @@ ostream& operator<<(ostream &out, const Options &o)
 {
 	return out << NV(o.data_dir) << endl
 			<< NV(o.imgs_glob) << endl
+			<< NV(o.reconstruction_dir) << endl
 			<< NV(o.begin_idx) << NV(o.end_idx) << endl
 			<< NV(o.ci.K) << endl
 			<< NV(o.ci.k) << endl
@@ -866,4 +992,9 @@ ostream& operator<<(ostream &out, const Options &o)
 			<< NV(o.matcher_name) << endl
 			// TODO: output matcher options
 			<< NV(o.match_ratio);
+}
+
+ostream& operator<<(ostream &out, const ID &id)
+{
+    return out << '<' << id.frameID << ", " << id.pointID << '>';
 }

@@ -42,6 +42,7 @@
 #ifndef __OPENCV_SFM_LENLEN_HPP__
 #define __OPENCV_SFM_LENLEN_HPP__
 
+#include <set>
 #include <vector>
 #include "opencv2/core.hpp"
 #include "opencv2/features2d.hpp"
@@ -90,6 +91,50 @@ CV_EXPORTS void getSymmetricMatches(const Ptr<DescriptorMatcher> &matcher1, cons
 // Descriptor averaging
 /////////////////////////////////////////////////
 CV_EXPORTS void computeAverageDescriptor(cv::InputArrayOfArrays _descriptors, cv::OutputArray _average);
+
+
+/////////////////////////////////////////////////
+// Track building
+/////////////////////////////////////////////////
+
+struct CV_EXPORTS_W ID
+{
+    short frameID;
+    short pointID;
+
+    CV_WRAP bool operator==(const ID &that) const throw() { return frameID == that.frameID && pointID == that.pointID; }
+    CV_WRAP bool operator<(const ID &that)  const throw() { return frameID == that.frameID ? pointID < that.pointID : frameID < that.frameID; }
+    CV_WRAP bool operator!=(const ID &that) const throw() { return !(*this == that); }
+};
+typedef std::set<ID> sID;
+typedef std::vector<ID> vID;
+typedef std::vector<vID> vvID;
+
+class CV_EXPORTS_W Tracks // TODO: make it an Algorithm
+{
+
+public:
+    virtual ~Tracks() {}
+
+    CV_WRAP virtual bool hasParent(const ID id) const = 0;
+    CV_WRAP virtual bool hasRoot(const ID id) const  = 0;
+    CV_WRAP virtual bool isInSomeTrack(const ID id) const  = 0;
+    CV_WRAP virtual       ID& parentID(const ID id)        = 0;
+    CV_WRAP virtual const ID& parentID(const ID id) const = 0;
+    CV_WRAP virtual       ID& rootID(const ID id)       = 0;
+    CV_WRAP virtual const ID& rootID(const ID id) const = 0;
+    CV_WRAP virtual       sID& track(const ID id)       = 0;
+    CV_WRAP virtual const sID& track(const ID id) const = 0;
+
+    CV_WRAP virtual void makeNewTrack(const ID f1, const ID f2) = 0;
+    CV_WRAP virtual void addToTrack(const ID newPoint, const ID parent) = 0;
+    CV_WRAP virtual bool canMerge(const ID a, const ID b) const = 0;
+    CV_WRAP virtual void merge   (const ID a, const ID b) const = 0;
+
+    CV_WRAP virtual void getTracks(vvID &tracks) const = 0;
+
+    CV_WRAP static Ptr<Tracks> create();
+};
 
 } // namespace cv
 
