@@ -16,6 +16,7 @@
 #include <unordered_set>
 #include <vector>
 #include <opencv2/core.hpp>
+#include <opencv2/core/ocl.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/features2d.hpp>
@@ -217,6 +218,12 @@ int main(int argc, char **argv)
 	Options opts = Options::create(argv[1]);
 	INFO(opts);
 
+    ocl::Device oclDev = ocl::Device::getDefault();
+    ocl::setUseOpenCL(ocl::haveOpenCL());
+	INFO(ocl::haveOpenCL());
+	INFO(ocl::useOpenCL());
+	INFO(oclDev.name());
+
 	// get names of images
 	vString imgNames;
 	glob(opts.data_dir + "/" + opts.imgs_glob, imgNames);
@@ -267,7 +274,7 @@ int main(int argc, char **argv)
 
     // write pairwise matches to output files
     char fname[256] = {0};
-    const string fnameFmt = opts.reconstruction_dir + "/static_measurement_desc%07d.txt";
+    const string fnameFmt = opts.reconstruction_dir + "/measurement/static_measurement_desc%07d.txt";
 //  boost::filesystem::create_directory(opts.reconstruction_dir);
     int i = -1;
     Mat3b srcImg;
@@ -814,7 +821,7 @@ void SfMMatcher::getTracks(vvID &tracks_)
         } // while(r != e)
         // done identifying duplicate points, but still need to discard them
         CV_DbgAssert(w <= e);
-        DEBUG((track.size() - (w - track.begin())));
+//        DEBUG((track.size() - (w - track.begin())));
         track.resize(w - track.begin());
     } // for( track : tracks)
 } // void SfMMatcher::getTracks(vvID &tracks_
