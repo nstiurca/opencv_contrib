@@ -824,7 +824,7 @@ void SfMMatcher::getTracks(vvID &tracks_)
 //        DEBUG((track.size() - (w - track.begin())));
         track.resize(w - track.begin());
     } // for( track : tracks)
-} // void SfMMatcher::getTracks(vvID &tracks_
+} // void SfMMatcher::getTracks(vvID &tracks_)
 
 #ifdef HAVE_cvv
 template <typename MAT>
