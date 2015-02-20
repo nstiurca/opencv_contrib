@@ -866,7 +866,7 @@ struct SURFInvoker : ParallelLoopBody
     std::vector<float> DW;
 };
 
-CV_INIT_ALGORITHM(SURF_Impl, "xFeature2D.SURF",
+CV_INIT_ALGORITHM(SURF_Impl, "Feature2D.SURF",
     obj.info()->addParam(obj, "hessianThreshold", obj.hessianThreshold);
     obj.info()->addParam(obj, "nOctaves", obj.nOctaves);
     obj.info()->addParam(obj, "nOctaveLayers", obj.nOctaveLayers);

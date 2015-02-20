@@ -61,7 +61,7 @@ public:
     enum { PATCH_SIZE = 48, KERNEL_SIZE = 9 };
 
     // bytes is a length of descriptor in bytes. It can be equal 16, 32 or 64 bytes.
-    BriefDescriptorExtractorImpl( int bytes = 32 );
+    explicit BriefDescriptorExtractorImpl( int bytes = 32 );
 
     virtual void read( const FileNode& );
     virtual void write( FileStorage& ) const;
@@ -72,12 +72,17 @@ public:
 
     virtual void compute(InputArray image, std::vector<KeyPoint>& keypoints, OutputArray descriptors);
 
+    virtual AlgorithmInfo* info() const;
+
 protected:
     typedef void(*PixelTestFn)(InputArray, const std::vector<KeyPoint>&, OutputArray);
     
     int bytes_;
     PixelTestFn test_fn_;
 };
+
+CV_INIT_ALGORITHM(BriefDescriptorExtractorImpl, "Feature2D.BriefDescriptorExtractor",
+    obj.info()->addParam(obj, "bytes", obj.bytes_))
 
 Ptr<BriefDescriptorExtractor> BriefDescriptorExtractor::create( int bytes )
 {

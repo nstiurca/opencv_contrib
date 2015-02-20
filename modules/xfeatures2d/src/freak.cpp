@@ -87,6 +87,8 @@ public:
                                  const double corrThresh = 0.7, bool verbose = true );
     virtual void compute( InputArray image, std::vector<KeyPoint>& keypoints, OutputArray descriptors );
 
+    virtual AlgorithmInfo* info() const;
+
 protected:
 
     void buildPattern();
@@ -138,6 +140,12 @@ protected:
     OrientationPair orientationPairs[NB_ORIENPAIRS];
 };
 
+CV_INIT_ALGORITHM(FREAK_Impl, "Feature2D.FREAK",
+    obj.info()->addParam(obj, "orientationNormalized", obj.orientationNormalized);
+    obj.info()->addParam(obj, "scaleNormalized", obj.scaleNormalized);
+    obj.info()->addParam(obj, "patternScale", obj.patternScale);
+    obj.info()->addParam(obj, "nOctaves", obj.nOctaves))
+//    obj.info()->addParam(obj, "selectedPairs", obj.selectedPairs0))
 
 static const double FREAK_LOG2 = 0.693147180559945;
 static const int FREAK_NB_ORIENTATION = 256;
