@@ -110,6 +110,36 @@ typedef std::set<ID> sID;
 typedef std::vector<ID> vID;
 typedef std::vector<vID> vvID;
 
+class CV_EXPORTS_W TrackBuilder : public virtual Algorithm
+{
+public:
+    CV_WRAP virtual void detectAndComputeTracks(InputArrayOfArrays images,
+            OutputArrayOfArrays allDescriptors, CV_OUT vvKeyPoint &allKeypoints,
+            CV_OUT vvID &tracks) = 0;
+
+};
+
+class CV_EXPORTS_W SimpleTrackBuilder : public TrackBuilder
+{
+public:
+    CV_WRAP static Ptr<SimpleTrackBuilder> create(double ratio_threshold = 0.7,
+            Ptr<FeatureDetector> detector = ORB::create(),
+//            Ptr<DescriptorExtractor> extractor = Ptr<DescriptorExtractor>(),
+            Ptr<DescriptorMatcher> matcher = Ptr<DescriptorMatcher>());
+
+    CV_WRAP virtual void setRatioTestThreshold(double ratio_threshold) = 0;
+    CV_WRAP virtual double getRatioTestThreshold() const = 0;
+
+    CV_WRAP virtual void setDetector(Ptr<FeatureDetector> detector) = 0;
+    CV_WRAP virtual const Ptr<FeatureDetector> getDetector() const = 0;
+
+//    CV_WRAP virtual void setExtractor(Ptr<DescriptorExtractor> extractor) = 0;
+//    CV_WRAP virtual const Ptr<DescriptorExtractor> getExtractor() const = 0;
+
+    CV_WRAP virtual void setMatcher(Ptr<DescriptorMatcher> macher) = 0;
+    CV_WRAP virtual const Ptr<DescriptorMatcher> getMatcher() const = 0;
+};
+
 class CV_EXPORTS_W Tracks // TODO: make it an Algorithm
 {
 

@@ -47,7 +47,12 @@ namespace cv
 
 bool initModule_sfm(void)
 {
-  return true;
+    Ptr<TrackBuilder> tb;
+
+    tb = SimpleTrackBuilder::create();
+    tb->info();
+
+    return true;
 }
 
 }

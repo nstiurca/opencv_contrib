@@ -45,5 +45,10 @@
 #include "opencv2/sfm.hpp"
 #include "opencv2/core/utility.hpp"
 #include "opencv2/core/private.hpp"
+#include "opencv2/core/ocl.hpp"
+
+#include <algorithm>
+
+#include "../samples/logging.h"
 
 #endif
