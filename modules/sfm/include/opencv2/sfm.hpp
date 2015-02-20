@@ -90,7 +90,7 @@ CV_EXPORTS void getSymmetricMatches(const Ptr<DescriptorMatcher> &matcher1, cons
 /////////////////////////////////////////////////
 // Descriptor averaging
 /////////////////////////////////////////////////
-CV_EXPORTS void computeAverageDescriptor(cv::InputArrayOfArrays _descriptors, cv::OutputArray _average);
+CV_EXPORTS void computeAverageDescriptor(cv::InputArrayOfArrays descriptors, cv::OutputArray average);
 
 
 /////////////////////////////////////////////////
