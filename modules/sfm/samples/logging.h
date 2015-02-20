@@ -36,9 +36,9 @@ std::ostream& operator<<(std::ostream &out, const std::vector<T> &vec)
 }
 
 template<typename T>
-std::ostream& operator<<(std::ostream &out, const std::set<T> &set)
+std::ostream& operator<<(std::ostream &out, const std::set<T> &s)
 {
-    return printContainer(out, set, '{', '}');
+    return printContainer(out, s, '{', '}');
 }
 
 #define HAVE_EXCEPTIONS 1
@@ -70,7 +70,7 @@ std::ostream& operator<<(std::ostream &out, const std::set<T> &set)
 #define DEBUG_STR(body) MSG_BASE(::std::clog, "DEBUG:" << body)
 #endif
 
-#define NV(var) "  " << #var ": " << var
+#define NV(var) " " << #var ": " << var
 
 #define DEBUG(var) DEBUG_STR(NV(var))
 #define INFO(var) INFO_STR(NV(var))
