@@ -104,12 +104,12 @@ public:
     }
     bool canMerge(const ID a, const ID b) const {
         CV_DbgAssert(rootID(a) == a && rootID(b) == b);
-        WARN_STR("STUB");
+        DEBUG_STR("STUB");
         return false;
     }
     void merge(const ID a, const ID b) const {
         CV_DbgAssert(rootID(a) == a && rootID(b) == b);
-        WARN_STR("STUB");
+        DEBUG_STR("STUB");
     }
 
     void getTracks(vvID &tOut) const
@@ -117,9 +117,9 @@ public:
         tOut.clear();
         tOut.reserve(tracks.size());
         for(const auto &t : tracks) {
-            INFO(t.first);
-            INFO(t.second.size());
-            INFO(*t.second.begin());
+            DEBUG(t.first);
+            DEBUG(t.second.size());
+            DEBUG(*t.second.begin());
             tOut.emplace_back(t.second.begin(), t.second.end());
         }
     }

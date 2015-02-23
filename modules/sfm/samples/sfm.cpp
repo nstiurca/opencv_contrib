@@ -761,13 +761,13 @@ void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
                             if(t.canMerge(t.rootID(f1), t.rootID(f2))) {
                                 t.merge(t.rootID(f1), t.rootID(f2));
                             } else {
-                                WARN_STR("STUB");
-                                WARN(i);
-                                WARN(j);
-                                WARN(f1);
-                                WARN(f2);
-                                WARN(t.track(f1));
-                                WARN(t.track(f2));
+                                DEBUG_STR("STUB");
+                                DEBUG(i);
+                                DEBUG(j);
+                                DEBUG(f1);
+                                DEBUG(f2);
+                                DEBUG(t.track(f1));
+                                DEBUG(t.track(f2));
                             }
                         }
                     } else {
