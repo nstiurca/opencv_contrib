@@ -36,6 +36,7 @@ using namespace cv;
 /////////////////////////////////////////////////
 typedef vector<String> vString;
 typedef Vec<double, 5> Vec5d;
+typedef Vec<double, 8> Vec8d;
 typedef Matx<double, 6,6> Matx66d;
 typedef Matx66d Cov6d;
 typedef Vec<double, 4> Vec4d;
@@ -49,7 +50,7 @@ typedef vector<Ptr<DescriptorMatcher>> vDescriptorMatcher;
 struct CameraInfo
 {
 	Matx33d K;
-	Vec5d k;
+	Vec8d k;
 	int rows;
 	int cols;
 };
@@ -523,7 +524,10 @@ Options Options::create(const String &optionsFname)
 			(double)calibFS["k2"],
 			(double)calibFS["k3"],
 			(double)calibFS["k4"],
-			(double)calibFS["k5"];
+			(double)calibFS["k5"],
+      calibFS["k6"].isNone() ? 0.0 : (double)calibFS["k6"],
+      calibFS["k7"].isNone() ? 0.0 : (double)calibFS["k7"],
+      calibFS["k8"].isNone() ? 0.0 : (double)calibFS["k8"];
 	ret.ci.rows = (int)calibFS["ImageH"];
 	ret.ci.cols = (int)calibFS["ImageW"];
 
