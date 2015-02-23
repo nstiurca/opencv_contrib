@@ -44,6 +44,7 @@
 
 #include <set>
 #include <vector>
+#include <iostream>
 #include "opencv2/core.hpp"
 #include "opencv2/features2d.hpp"
 
@@ -106,6 +107,11 @@ struct CV_EXPORTS_W ID
     CV_WRAP bool operator<(const ID &that)  const throw() { return frameID == that.frameID ? pointID < that.pointID : frameID < that.frameID; }
     CV_WRAP bool operator!=(const ID &that) const throw() { return !(*this == that); }
 };
+static inline
+std::ostream& operator << (std::ostream &out, const ID &id)
+{
+    return out << '<' << id.frameID << ", " << id.pointID << '>';
+}
 typedef std::set<ID> sID;
 typedef std::vector<ID> vID;
 typedef std::vector<vID> vvID;

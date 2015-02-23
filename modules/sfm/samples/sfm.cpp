@@ -179,7 +179,6 @@ static void printRow(ostream &out, InputArray descriptor, const int rowIdx);
 static ostream& operator<<(ostream &out, const PoseWithVel &odo);
 static istream& operator>>(istream &in, PoseWithVel &odo);
 static ostream& operator<<(ostream &out, const Options &o);
-static ostream& operator<<(ostream &out, const ID &id);
 
 static void printPointLoc(ostream &out, const SfMMatcher &matcher, const ID id);
 static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const ID id,
@@ -973,8 +972,8 @@ ostream& operator<<(ostream &out, const PoseWithVel &odo)
 {
 	streamsize oldWidth = out.width();
 	char oldFill = out.fill();
-	return out << odo.stamp.sec << '.' << setw(9) << setfill('0') << odo.stamp.nsec
-			<< setw(oldWidth) << setfill(oldFill)
+	return (out << odo.stamp.sec << '.' << setw(9) << setfill('0') << odo.stamp.nsec
+			<< setw(oldWidth) << setfill(oldFill))
 			<= odo.pos     <= odo.ori     <= odo.pose_cov
 			<= odo.vel_lin <= odo.vel_ang <= odo.vel_cov;
 }
@@ -982,12 +981,12 @@ ostream& operator<<(ostream &out, const PoseWithVel &odo)
 istream& operator>>(istream &in, PoseWithVel &odo)
 {
 	char dummy;
-	return in >> odo.stamp.sec >> dummy >> odo.stamp.nsec
-			>= odo.pos     >= odo.ori     >= odo.pose_cov
+	return (in >> odo.stamp.sec >> dummy >> odo.stamp.nsec)
+			>= odo.pos    >= odo.ori     >= odo.pose_cov
 			>= odo.vel_lin >= odo.vel_ang >= odo.vel_cov;
 }
 
-ostream& operator<<(ostream &out, const Options &o)
+::std::ostream& operator<<( ::std::ostream &out, const Options &o)
 {
 	return out << NV(o.data_dir) << endl
 			<< NV(o.imgs_glob) << endl
@@ -1005,7 +1004,4 @@ ostream& operator<<(ostream &out, const Options &o)
 			<< NV(o.match_ratio);
 }
 
-ostream& operator<<(ostream &out, const ID &id)
-{
-    return out << '<' << id.frameID << ", " << id.pointID << '>';
-}
+//::std::ostream& operator<<( ::std::ostream &out, const ::cv::ID &id)

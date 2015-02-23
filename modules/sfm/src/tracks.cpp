@@ -29,11 +29,6 @@ namespace /* anonymous */
 {
 using namespace cv;
 
-std::ostream& operator<<(std::ostream &out, const cv::ID &id)
-{
-    return out << '<' << id.frameID << ", " << id.pointID << '>';
-}
-
 class Tracks_Impl : public Tracks
 {
     std::unordered_map<ID, sID> tracks;
@@ -135,3 +130,4 @@ Ptr<Tracks> Tracks::create()
 }
 
 } // namespace cv
+
