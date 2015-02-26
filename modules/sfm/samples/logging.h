@@ -9,8 +9,15 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <map>
 #include <vector>
 #include <set>
+
+template<typename T, typename U>
+std::ostream& operator<<(std::ostream &out, const std::pair<T, U> &p)
+{
+    return out << '(' << p.first << ", " << p.second << ')';
+}
 
 template<class Container>
 std::ostream& printContainer(std::ostream &out, const Container &container, const char s, const char e)
@@ -39,6 +46,12 @@ template<typename T>
 std::ostream& operator<<(std::ostream &out, const std::set<T> &s)
 {
     return printContainer(out, s, '{', '}');
+}
+
+template<typename K, typename U>
+std::ostream& operator<<(std::ostream &out, const std::map<K, U> &m)
+{
+    return printContainer(out, m, '<', '>');
 }
 
 #define HAVE_EXCEPTIONS 1
