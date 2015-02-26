@@ -98,6 +98,7 @@ struct Options
 	String matcher_name;
 	FileNode matcher_options;
 	double match_ratio;
+	double min_keypoint_distance;
 
 	static Options create(const String &optionsFname);
 };
@@ -137,6 +138,11 @@ struct SfMMatcher
 {
     CameraInfo ci;
 
+    typedef vector<KeyPoint*> vKPp;
+    typedef vector<vKPp> vvKPp;
+    vector<vvKPp> grid;
+    double min_keypoint_distance;
+
 	Ptr<FeatureDetector> detector;
 	Ptr<DescriptorExtractor> extractor;
 	Ptr<Feature2D> feature2d;
@@ -158,6 +164,7 @@ struct SfMMatcher
 	Ptr<Tracks> tracks;
 
 	void detectAndComputeKeypoints( const vUMat &images );
+	void pruneDuplicateKeypoints(vKeyPoint &keypoints);
 	void cvvPlotKeypoints(InputArrayOfArrays _imgs,
 	        const Scalar &color=Scalar::all(-1), int flags=DrawMatchesFlags::DRAW_RICH_KEYPOINTS) const;
 	void trainMatchers();
@@ -552,6 +559,9 @@ Options Options::create(const String &optionsFname)
 
 	ret.match_ratio = (double)fs["match_ratio"];
 
+	ret.min_keypoint_distance = fs["min_keypoint_distance"].isNone()
+	        ? 0.0 : (double)fs["min_keypoint_distance"];
+
 	return ret;
 }
 
@@ -565,11 +575,20 @@ SfMMatcher SfMMatcher::create(const Options &opts)
 	SfMMatcher ret;
 
 	ret.ci = opts.ci;
+    ret.min_keypoint_distance = opts.min_keypoint_distance;
+
+    const int M = ret.ci.rows / ret.min_keypoint_distance;
+    const int N = ret.ci.cols / ret.min_keypoint_distance;
+    ret.grid.resize(M+2, vvKPp(N+2));
 
 	if(opts.detector_same_as_extractor) {
 	    INFO(opts.detector_name);
 	    ret.feature2d = Feature2D::create<Feature2D>(opts.detector_name);
 	    ret.feature2d->read(opts.detector_options);
+      if(opts.min_keypoint_distance > 0.0) {
+          ret.detector = ret.extractor = ret.feature2d;
+          ret.feature2d.release();
+      }
 	} else {
 	    INFO(opts.detector_name);
 	    INFO(opts.extractor_name);
@@ -611,6 +630,65 @@ SfMMatcher SfMMatcher::create(const Options &opts)
 	return ret;
 }
 
+void SfMMatcher::pruneDuplicateKeypoints(vKeyPoint &keypoints)
+{
+    const int M = ci.rows / min_keypoint_distance;
+    const int N = ci.cols / min_keypoint_distance;
+    CV_DbgAssert((int)grid.size() == M+2);
+    for(auto &row : grid) {
+        CV_DbgAssert((int)row.size() == N+2);
+        for(auto &cell : row) {
+            cell.clear();
+        }
+    }
+
+    enum { SUPPRESSED = -10 };
+
+    for(KeyPoint &kp : keypoints) {
+        // compute cell location
+        const int gx = kp.pt.x / min_keypoint_distance + 1;
+        const int gy = kp.pt.y / min_keypoint_distance + 1;
+        CV_DbgAssert(gx > 0);
+        CV_DbgAssert(gx <= N);
+        CV_DbgAssert(gy > 0);
+        CV_DbgAssert(gy <= M);
+
+        // compute bounding box around kp
+        Rect2f r(kp.pt.x-min_keypoint_distance, kp.pt.y-min_keypoint_distance,
+                min_keypoint_distance*2.0, min_keypoint_distance*2.0);
+
+        // check surrounding cells for suppressant, or suppress all
+        for(int y=gy-1; y<=gy+1; ++y) {
+            CV_DbgAssert(y >= 0);
+            CV_DbgAssert(y <= M+1);
+            for(int x=gx-1; x<=gx+1; ++x) {
+                CV_DbgAssert(x >= 0);
+                CV_DbgAssert(x <= N+1);
+                for(KeyPoint *p : grid[y][x]) {
+                    if(p->pt.inside(r)) {
+                        // kp overlaps with *p, so suppress one
+                        if(kp.response > p->response) {
+                            p->class_id = SUPPRESSED;
+                        } else {
+                            kp.class_id = SUPPRESSED;
+                        }
+                    }
+                }
+            }
+        }
+
+        // add to cell
+        grid[gy][gx].push_back(&kp);
+    }
+
+    // remove suppressed keypoints
+    auto newEnd = remove_if(keypoints.begin(), keypoints.end(),
+            [](const KeyPoint &kp) { return kp.class_id == SUPPRESSED; });
+    DEBUG(keypoints.size());
+    keypoints.resize(newEnd - keypoints.begin());
+    DEBUG(keypoints.size());
+}
+
 void SfMMatcher::detectAndComputeKeypoints( const vUMat &images )
 {
 	const int N = images.size();
@@ -625,9 +703,11 @@ void SfMMatcher::detectAndComputeKeypoints( const vUMat &images )
 
 	for(int i=0; i<N; ++i) {
 		if(combined) {
-			feature2d->detectAndCompute(images[i], emptymask, allKeypoints[i], allDescriptors[i]);
+        CV_DbgAssert(!min_keypoint_distance>0.0);
+		    feature2d->detectAndCompute(images[i], emptymask, allKeypoints[i], allDescriptors[i]);
 		} else {
 			detector->detect(images[i], allKeypoints[i], emptymask);
+            if(min_keypoint_distance>0.0) pruneDuplicateKeypoints(allKeypoints[i]);
 			extractor->compute(images[i], allKeypoints[i], allDescriptors[i]);
 		}
 		const int n = allKeypoints[i].size();
@@ -641,7 +721,7 @@ void SfMMatcher::detectAndComputeKeypoints( const vUMat &images )
 		undistortedKPcoords[i].create(n,1);
 	    undistortPoints(distortedKPcoords[i].clone(), undistortedKPcoords[i],
 	            ci.K, ci.k, noArray(), ci.K);
-	    printf("Image % 4i / %i (%.1f%%). Found %i descriptors\n", i, N, 100.0 * i / N, n);
+	    printf("Image % 4i / %i (%.1f%%). Found %i descriptors\n", i+1, N, 100.0 * (i+1) / N, n);
 	}
 }
 
@@ -653,6 +733,7 @@ void SfMMatcher::trainMatchers()
         matchers[i] = matcherTemplate->clone(true);
         matchers[i]->add(allDescriptors[i]);
         matchers[i]->train();
+        printf("Train % 4i / %i (%.1f%%).\n", i+1, N, 100.0 * (i+1) / N);
     }
 }
 
@@ -683,8 +764,9 @@ static void cvvVisualizePairwiseMatchesImpl(const vector<MAT> &imgs,
     const int N = imgs.size();
     char description[100];
     for (int i = 0; i < N; ++i) {
-        const int jMax = N > 10 ? i : 1;
-        for (int j = 0; j < jMax; ++j) {
+        const int jMin = max(i-5, 0);
+        const int jMax = min(i+5, i);
+        for (int j = jMin; j < jMax; ++j) {
             snprintf(description, sizeof(description),
                     "symmetric matches %i  %i", i, j);
             cvv::debugDMatch(imgs[i], allKeypoints[i], imgs[j],
@@ -750,6 +832,7 @@ void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
                 const ID f1 = { i, m.queryIdx };
                 const ID f2 = { j, m.trainIdx };
                 match_adjacency_lists[f1].insert(f2);
+                //match_adjacency_lists[f2].insert(f1);
                 if(t.isInSomeTrack(f2)) {
                     if(t.isInSomeTrack(f1)) {
                         if(t.rootID(f1) == t.rootID(f2)) {
@@ -834,6 +917,8 @@ template <typename MAT>
 static void cvvPlotKeypointsImpl(const vector<MAT> &imgs, const vvKeyPoint &allKeypoints,
         const Scalar &color, int flags)
 {
+    if(!cvv::debugMode()) return;
+
     CV_Assert(allKeypoints.size() == imgs.size());
     const int N = imgs.size();
     MAT m;
@@ -849,6 +934,8 @@ static void cvvPlotKeypointsImpl(const vector<MAT> &imgs, const vvKeyPoint &allK
 void SfMMatcher::cvvPlotKeypoints(InputArrayOfArrays _imgs,
         const Scalar &color, int flags) const
 {
+    if(!cvv::debugMode()) return;
+
 #ifdef HAVE_cvv
     if(_imgs.isMatVector()) {
         vMat imgs;
@@ -1001,7 +1088,8 @@ istream& operator>>(istream &in, PoseWithVel &odo)
 			// TODO: output extractor options
 			<< NV(o.matcher_name) << endl
 			// TODO: output matcher options
-			<< NV(o.match_ratio);
+			<< NV(o.match_ratio)
+			<< NV(o.min_keypoint_distance);
 }
 
 //::std::ostream& operator<<( ::std::ostream &out, const ::cv::ID &id)
