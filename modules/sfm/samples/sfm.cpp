@@ -962,10 +962,10 @@ static void cvvPlotKeypointsImpl(const vector<MAT> &imgs, const vvKeyPoint &allK
 
 void SfMMatcher::cvvPlotKeypoints(InputArrayOfArrays _imgs, const Scalar &color, int flags) const
 {
+#ifdef HAVE_cvv
     if(!cvv::debugMode())
         return;
 
-#ifdef HAVE_cvv
     if(_imgs.isMatVector()) {
         vMat imgs;
         _imgs.getMatVector(imgs);
