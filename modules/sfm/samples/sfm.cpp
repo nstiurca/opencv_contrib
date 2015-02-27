@@ -298,7 +298,7 @@ int main(int argc, char **argv)
             i = srcID.frameID;
             srcImg = (Mat3b)imgsC[i].getMat(ACCESS_READ);
             snprintf(fname, sizeof fname, fnameFmt.c_str(), i);
-            INFO(fname);
+//            INFO(fname);
             CV_Assert(ofs);     // check that the previous file was OK
             ofs.close();        // close previous file
             ofs.open(fname);    // TODO: check ofs is ready for opening?
@@ -430,6 +430,30 @@ int main(int argc, char **argv)
                 }
             }
         }
+
+
+        // display some statistics about the track lengths
+        vector<double> vTrack_sizes, vTrack_mean_size, vTrack_Stddev_size;
+        map<int, vector<int> > tracksIdxOfLengthHist;
+        map<int, int> trackLengthsHist;
+
+        for(size_t i=0; i<tracks.size(); ++i) {
+            const auto &t = tracks[i];
+            vTrack_sizes.push_back(t.size());
+            tracksIdxOfLengthHist[t.size()].push_back(i);
+            ++trackLengthsHist[t.size()];
+        }
+        INFO(trackLengthsHist);
+        cv::meanStdDev(vTrack_sizes, vTrack_mean_size, vTrack_Stddev_size);
+        INFO(vTrack_mean_size);
+        INFO(vTrack_Stddev_size);
+
+        // longest track(s)
+        const int maxTrackSize = tracksIdxOfLengthHist.rbegin()->first;
+        const vector<int> &vLongestTracksIdx = tracksIdxOfLengthHist.rbegin()->second;
+        INFO(maxTrackSize);
+        INFO(vLongestTracksIdx);
+        INFO(vLongestTracksIdx.size());
 
 #ifdef HAVE_cvv
         cvv::showImage(stitched, CVVISUAL_LOCATION, "stitched tracks");
@@ -577,9 +601,11 @@ SfMMatcher SfMMatcher::create(const Options &opts)
     ret.ci = opts.ci;
     ret.min_keypoint_distance = opts.min_keypoint_distance;
 
-    const int M = ret.ci.rows / ret.min_keypoint_distance;
-    const int N = ret.ci.cols / ret.min_keypoint_distance;
-    ret.grid.resize(M + 2, vvKPp(N + 2));
+    if(ret.min_keypoint_distance > 0.0) {
+        const int M = ret.ci.rows / ret.min_keypoint_distance;
+        const int N = ret.ci.cols / ret.min_keypoint_distance;
+        ret.grid.resize(M + 2, vvKPp(N + 2));
+    }
 
     if(opts.detector_same_as_extractor) {
         INFO(opts.detector_name);
@@ -631,8 +657,9 @@ SfMMatcher SfMMatcher::create(const Options &opts)
 
 void SfMMatcher::pruneDuplicateKeypoints(vKeyPoint &keypoints)
 {
-    const int M = ci.rows / min_keypoint_distance;
-    const int N = ci.cols / min_keypoint_distance;
+    CV_Assert(min_keypoint_distance > 0.0);
+    const int M = ci.rows / max(min_keypoint_distance, 2.0);
+    const int N = ci.cols / max(min_keypoint_distance, 2.0);
     CV_DbgAssert((int)grid.size() == M+2);
     for(auto &row : grid) {
         CV_DbgAssert((int)row.size() == N+2);
@@ -822,6 +849,8 @@ void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
     Tracks &t = *tracks;
     match_adjacency_lists.clear();
 
+    int canMerge = 0;
+    int cantMerge = 0;
     for(int i = 0; i < N; ++i) {
         for(int j = i + 1; j < N; ++j) {
             for(const DMatch &m : pairwiseMatches[i][j]) {
@@ -836,9 +865,10 @@ void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
                         } else {
                             // f1 and f2 already in different tracks
                             // TODO: merge tracks?!?!?
-                            if(t.canMerge(t.rootID(f1), t.rootID(f2))) {
-                                t.merge(t.rootID(f1), t.rootID(f2));
+                            if(t.tryMerge(t.rootID(f1), t.rootID(f2))) {
+                                ++canMerge;
                             } else {
+                                ++cantMerge;
                                 DEBUG_STR("STUB");
                                 DEBUG(i);
                                 DEBUG(j);
@@ -866,6 +896,8 @@ void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
         } // for(int j=i+1; j<N; ++j)
     } // for(int i=0; i<N; ++i)
     INFO(match_adjacency_lists.size());
+    INFO(canMerge);
+    INFO(cantMerge);
 } // void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
 
 static inline bool frameLess(const int a, const ID b)

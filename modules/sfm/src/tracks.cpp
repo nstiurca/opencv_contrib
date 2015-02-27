@@ -1,7 +1,4 @@
-#include <opencv2/sfm.hpp>
-#include <functional>
-#include <unordered_map>
-#include "../samples/logging.h"
+#include "precomp.hpp"
 
 namespace std
 {
@@ -31,47 +28,24 @@ using namespace cv;
 
 class Tracks_Impl : public Tracks
 {
-    std::unordered_map<ID, sID> tracks;
+    std::unordered_map<ID, vID> tracks;
     std::unordered_map<ID, ID> parents;
-    std::unordered_map<ID, ID> roots;
+//    std::unordered_map<ID, ID> roots;
 
 public:
-    bool hasParent(const ID id) const {
+    bool isInSomeTrack(const ID id) const {
         return parents.find(id) != parents.end();
     }
-    bool hasRoot(const ID id) const {
-        return roots.find(id) != roots.end();
-    }
-    bool isInSomeTrack(const ID id) const {
-        CV_DbgAssert(hasParent(id) == hasRoot(id));
-        return hasParent(id);
-    }
-    ID& parentID(const ID id) {
+    ID rootID(const ID id) {
         CV_Assert(isInSomeTrack(id));    // maybe this shouldn't be here??
-        return parents[id];
+        if(parents[id] == id) return id;
+        return parents[id] = rootID(parents[id]);   // recursion with path-shortening
     }
-    const ID& parentID(const ID id) const {
+    vID& track(const ID id) {
         CV_Assert(isInSomeTrack(id));
-        return parents.find(id)->second;
-    }
-    ID& rootID(const ID id) {
-        CV_Assert(isInSomeTrack(id));    // maybe this shouldn't be here??
-        return roots[id];
-    }
-    const ID& rootID(const ID id) const {
-        CV_Assert(isInSomeTrack(id));
-        return roots.find(id)->second;
-    }
-    sID& track(const ID id) {
-        CV_Assert(hasRoot(id));
-        sID &t = tracks[rootID(id)];
-        CV_DbgAssert(t.find(id) != t.end());
-        return t;
-    }
-    const sID& track(const ID id) const {
-        CV_Assert(hasRoot(id));
-        const sID &t = tracks.find(rootID(id))->second;
-        CV_DbgAssert(t.find(id) != t.end());
+        vID &t = tracks[rootID(id)];
+        CV_DbgAssert(is_sorted(t.begin(), t.end()));
+        CV_DbgAssert(binary_search(t.begin(), t.end(), id));
         return t;
     }
 
@@ -87,24 +61,64 @@ public:
         CV_Assert(!isInSomeTrack(f2));
         tracks[f1] = {f1, f2};
         parents[f1] = parents[f2] = f1;
-        roots[f1] = roots[f2] = f1;
     }
     void addToTrack(const ID newPoint, const ID parent) {
         CV_Assert(isInSomeTrack(parent));
         CV_Assert(!isInSomeTrack(newPoint));
         // add newPoint to parent's track
-        track(parent).insert(newPoint);
-        parents[newPoint] = parent;
-        roots[newPoint] = rootID(parent);
+        vID &t = track(parent);
+        CV_DbgAssert(is_sorted(t.begin(), t.end()));
+        t.insert(lower_bound(t.begin(), t.end(), newPoint), newPoint);
+        CV_DbgAssert(is_sorted(t.begin(), t.end()));
+        parents[newPoint] = rootID(parent);
     }
-    bool canMerge(const ID a, const ID b) const {
-        CV_DbgAssert(rootID(a) == a && rootID(b) == b);
-        DEBUG_STR("STUB");
-        return false;
-    }
-    void merge(const ID a, const ID b) const {
-        CV_DbgAssert(rootID(a) == a && rootID(b) == b);
-        DEBUG_STR("STUB");
+
+    bool tryMerge(const ID a, const ID b) {
+        CV_Assert(rootID(a) == a && rootID(b) == b);
+        CV_Assert(a != b);
+
+        CV_DbgAssert(tracks.find(a) != tracks.end());
+        CV_DbgAssert(tracks.find(b) != tracks.end());
+        CV_DbgAssert(tracks.find(a) != tracks.find(b));
+
+        auto vaIt = tracks.find(a);
+        auto vbIt = tracks.find(b);
+
+        vID &va = vaIt->second;
+        vID &vb = vbIt->second;
+
+        CV_DbgAssert(is_sorted(va.begin(), va.end()));
+        CV_DbgAssert(is_sorted(vb.begin(), vb.end()));
+
+        DEBUG(va);
+        DEBUG(vb);
+
+        // first, consider what the merged set would look like
+        vID vab(va.size() + vb.size());
+        vID::iterator newEnd = std::merge(va.begin(), va.end(), vb.begin(), vb.end(), vab.begin());
+        vab.resize(newEnd - vab.begin());
+        DEBUG(vab);
+        // now look for any frames with multiple keypoints included
+        vID::iterator duplicate = adjacent_find(vab.begin(), vab.end(),
+                [](const ID a, const ID b) { return a.frameID == b.frameID; });
+
+        bool canMerge = duplicate == vab.end();
+        DEBUG(canMerge);
+
+        if(canMerge) {
+            // do the actual merge
+            if(va.size() >= vb.size()) {
+                vab.swap(va);       // replace a with ab
+                tracks.erase(vbIt); // erase b
+                parents[b] = a;     // point b to a
+            } else {
+                vab.swap(vb);       // replace b with ab
+                tracks.erase(vaIt); // erase a
+                parents[a] = b;     // point a to b
+            }
+        }
+
+        return canMerge;
     }
 
     void getTracks(vvID &tOut) const
@@ -112,9 +126,9 @@ public:
         tOut.clear();
         tOut.reserve(tracks.size());
         for(const auto &t : tracks) {
-            DEBUG(t.first);
-            DEBUG(t.second.size());
-            DEBUG(*t.second.begin());
+//            DEBUG(t.first);
+//            DEBUG(t.second.size());
+//            DEBUG(*t.second.begin());
             tOut.emplace_back(t.second.begin(), t.second.end());
         }
     }

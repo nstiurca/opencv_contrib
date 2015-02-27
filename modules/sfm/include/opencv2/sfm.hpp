@@ -152,20 +152,13 @@ class CV_EXPORTS_W Tracks // TODO: make it an Algorithm
 public:
     virtual ~Tracks() {}
 
-    CV_WRAP virtual bool hasParent(const ID id) const = 0;
-    CV_WRAP virtual bool hasRoot(const ID id) const  = 0;
-    CV_WRAP virtual bool isInSomeTrack(const ID id) const  = 0;
-    CV_WRAP virtual       ID& parentID(const ID id)        = 0;
-    CV_WRAP virtual const ID& parentID(const ID id) const = 0;
-    CV_WRAP virtual       ID& rootID(const ID id)       = 0;
-    CV_WRAP virtual const ID& rootID(const ID id) const = 0;
-    CV_WRAP virtual       sID& track(const ID id)       = 0;
-    CV_WRAP virtual const sID& track(const ID id) const = 0;
+    CV_WRAP virtual bool isInSomeTrack(const ID id) const = 0;
+    CV_WRAP virtual ID rootID(const ID id) = 0;
+    CV_WRAP virtual vID& track(const ID id) = 0;
 
     CV_WRAP virtual void makeNewTrack(const ID f1, const ID f2) = 0;
     CV_WRAP virtual void addToTrack(const ID newPoint, const ID parent) = 0;
-    CV_WRAP virtual bool canMerge(const ID a, const ID b) const = 0;
-    CV_WRAP virtual void merge   (const ID a, const ID b) const = 0;
+    CV_WRAP virtual bool tryMerge(const ID a, const ID b) = 0;
 
     CV_WRAP virtual void getTracks(vvID &tracks) const = 0;
 
