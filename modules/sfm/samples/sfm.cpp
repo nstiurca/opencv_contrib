@@ -37,7 +37,7 @@ using namespace cv;
 typedef vector<String> vString;
 typedef Vec<double, 5> Vec5d;
 typedef Vec<double, 8> Vec8d;
-typedef Matx<double, 6,6> Matx66d;
+typedef Matx<double, 6, 6> Matx66d;
 typedef Matx66d Cov6d;
 typedef Vec<double, 4> Vec4d;
 typedef Vec4d Quatd;
@@ -49,29 +49,29 @@ typedef vector<Ptr<DescriptorMatcher>> vDescriptorMatcher;
 
 struct CameraInfo
 {
-	Matx33d K;
-	Vec8d k;
-	int rows;
-	int cols;
+    Matx33d K;
+    Vec8d k;
+    int rows;
+    int cols;
 };
 
 struct Time
 {
-	uint64_t sec, nsec;
+    uint64_t sec, nsec;
 };
 
 struct PoseWithVel
 {
-	Time stamp;
-	Vec3d pos;
-	Quatd ori;
+    Time stamp;
+    Vec3d pos;
+    Quatd ori;
 
-	Cov6d pose_cov;
+    Cov6d pose_cov;
 
-	Vec3d vel_lin;
-	Vec3d vel_ang;
+    Vec3d vel_lin;
+    Vec3d vel_ang;
 
-	Cov6d vel_cov;
+    Cov6d vel_cov;
 };
 
 struct Options
@@ -79,27 +79,28 @@ struct Options
     // hold on to the opened YAML file because otherwise FileNodes below will dangle
     FileStorage fs;
 
-	// Where is the data?
-	string data_dir;
-	string imgs_glob;
-	string reconstruction_dir;
-	int begin_idx;
-	int end_idx;
+    // Where is the data?
+    string data_dir;
+    string imgs_glob;
+    string reconstruction_dir;
+    int begin_idx;
+    int end_idx;
 
-	// camera calibration
-	CameraInfo ci;
+    // camera calibration
+    CameraInfo ci;
 
-	// Interest point detection and matching
-	String detector_name;
-	FileNode detector_options;
-	String extractor_name;
-	FileNode extractor_options;
-	bool detector_same_as_extractor;
-	String matcher_name;
-	FileNode matcher_options;
-	double match_ratio;
+    // Interest point detection and matching
+    String detector_name;
+    FileNode detector_options;
+    String extractor_name;
+    FileNode extractor_options;
+    bool detector_same_as_extractor;
+    String matcher_name;
+    FileNode matcher_options;
+    double match_ratio;
+    double min_keypoint_distance;
 
-	static Options create(const String &optionsFname);
+    static Options create(const String &optionsFname);
 };
 
 //namespace std
@@ -137,37 +138,43 @@ struct SfMMatcher
 {
     CameraInfo ci;
 
-	Ptr<FeatureDetector> detector;
-	Ptr<DescriptorExtractor> extractor;
-	Ptr<Feature2D> feature2d;
-	Ptr<DescriptorMatcher> matcherTemplate;
-	vector<Ptr<DescriptorMatcher>> matchers;
+    typedef vector<KeyPoint*> vKPp;
+    typedef vector<vKPp> vvKPp;
+    vector<vvKPp> grid;
+    double min_keypoint_distance;
 
-	vvKeyPoint allKeypoints;
+    Ptr<FeatureDetector> detector;
+    Ptr<DescriptorExtractor> extractor;
+    Ptr<Feature2D> feature2d;
+    Ptr<DescriptorMatcher> matcherTemplate;
+    vector<Ptr<DescriptorMatcher>> matchers;
+
+    vvKeyPoint allKeypoints;
     vector<Mat2f> distortedKPcoords;
     vector<Mat2f> undistortedKPcoords;
-	vUMat allDescriptors;
-	vDescriptorMatcher allMatchers;
+    vUMat allDescriptors;
+    vDescriptorMatcher allMatchers;
 
-	vector<vector<vDMatch>> pairwiseMatches;
+    vector<vector<vDMatch>> pairwiseMatches;
 
-	typedef map<ID, set<ID>> match_adjacency_lists_t;
-	match_adjacency_lists_t match_adjacency_lists;
+    typedef map<ID, set<ID>> match_adjacency_lists_t;
+    match_adjacency_lists_t match_adjacency_lists;
 
 //	FeatureTrack tracks;
-	Ptr<Tracks> tracks;
+    Ptr<Tracks> tracks;
 
-	void detectAndComputeKeypoints( const vUMat &images );
-	void cvvPlotKeypoints(InputArrayOfArrays _imgs,
-	        const Scalar &color=Scalar::all(-1), int flags=DrawMatchesFlags::DRAW_RICH_KEYPOINTS) const;
-	void trainMatchers();
-	void computePairwiseSymmetricMatches(const double match_ratio);
-	void cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const;
+    void detectAndComputeKeypoints(const vUMat &images);
+    void pruneDuplicateKeypoints(vKeyPoint &keypoints);
+    void cvvPlotKeypoints(InputArrayOfArrays _imgs, const Scalar &color = Scalar::all(-1),
+            int flags = DrawMatchesFlags::DRAW_RICH_KEYPOINTS) const;
+    void trainMatchers();
+    void computePairwiseSymmetricMatches(const double match_ratio);
+    void cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const;
 //    void buildAdjacencyListsAndFeatureTracks_old();
     void buildAdjacencyListsAndFeatureTracks();
     void getTracks(vvID &tracks);
 
-	static SfMMatcher create(const Options &opts);
+    static SfMMatcher create(const Options &opts);
 };
 
 //////////////////////////////////////////////////
@@ -201,80 +208,81 @@ bool haveSfm = initModule_sfm();
 //////////////////////////////////////////////////
 int main(int argc, char **argv)
 {
-	// args?
-	if(2 > argc) {
-		usage(argc, argv);
-		exit(-1);
-	}
+    // args?
+    if(2 > argc) {
+        usage(argc, argv);
+        exit(-1);
+    }
 
-	// silly check of which algorithms are available
-	{
-		vString algorithms;
-		Algorithm::getList(algorithms);
-		DEBUG(algorithms);
-	}
+    // silly check of which algorithms are available
+    {
+        vString algorithms;
+        Algorithm::getList(algorithms);
+        DEBUG(algorithms);
+    }
 
-	// parse the options from the YAML file
-	Options opts = Options::create(argv[1]);
-	INFO(opts);
+    // parse the options from the YAML file
+    Options opts = Options::create(argv[1]);
+    INFO(opts);
 
     ocl::Device oclDev = ocl::Device::getDefault();
     ocl::setUseOpenCL(ocl::haveOpenCL());
-	INFO(ocl::haveOpenCL());
-	INFO(ocl::useOpenCL());
-	INFO(oclDev.name());
+    INFO(ocl::haveOpenCL());
+    INFO(ocl::useOpenCL());
+    INFO(oclDev.name());
 
-	// get names of images
-	vString imgNames;
-	glob(opts.data_dir + "/" + opts.imgs_glob, imgNames);
-	if(opts.end_idx>0) {
-		imgNames.resize(opts.end_idx);
-	}
-	if(opts.begin_idx>0) {
-		vString trunc(imgNames.begin() + opts.begin_idx, imgNames.end());
-		swap(trunc, imgNames);
-	}
-	const int N = imgNames.size();
+    // get names of images
+    vString imgNames;
+    glob(opts.data_dir + "/" + opts.imgs_glob, imgNames);
+    if(opts.end_idx > 0) {
+        imgNames.resize(opts.end_idx);
+    }
+    if(opts.begin_idx > 0) {
+        vString trunc(imgNames.begin() + opts.begin_idx, imgNames.end());
+        swap(trunc, imgNames);
+    }
+    const int N = imgNames.size();
 
-	// load images
-	INFO(N);
-	vUMat imgsC(N), imgsG(N);
-	INFO_STR("Loading images: ");
-	for(int i=0; i<N; ++i) {
-		imgsC[i] = imread(imgNames[i], IMREAD_COLOR).getUMat(USAGE_ALLOCATE_DEVICE_MEMORY);
-		imgsG[i] = imread(imgNames[i], IMREAD_GRAYSCALE).getUMat(USAGE_ALLOCATE_DEVICE_MEMORY);
+    // load images
+    INFO(N);
+    vUMat imgsC(N), imgsG(N);
+    INFO_STR("Loading images: ");
+    for(int i = 0; i < N; ++i) {
+        imgsC[i] = imread(imgNames[i], IMREAD_COLOR).getUMat(USAGE_ALLOCATE_DEVICE_MEMORY);
+        imgsG[i] = imread(imgNames[i], IMREAD_GRAYSCALE).getUMat(USAGE_ALLOCATE_DEVICE_MEMORY);
 
-		CV_Assert(imgsC[i].rows == opts.ci.rows);
-		CV_Assert(imgsC[i].cols == opts.ci.cols);
+        CV_Assert(imgsC[i].rows == opts.ci.rows);
+        CV_Assert(imgsC[i].cols == opts.ci.cols);
 
 #ifdef HAVE_cvv
-		cvv::showImage(imgsC[i], CVVISUAL_LOCATION, imgNames[i].c_str());
+        cvv::showImage(imgsC[i], CVVISUAL_LOCATION, imgNames[i].c_str());
 #endif
-	}
+    }
 
-	// create SfM matcher
-	SfMMatcher matcher = SfMMatcher::create(opts);
+    // create SfM matcher
+    SfMMatcher matcher = SfMMatcher::create(opts);
 
-	// get keypoints
-	matcher.detectAndComputeKeypoints(imgsG);
-	matcher.cvvPlotKeypoints(imgsC);
-	matcher.trainMatchers();
+    // get keypoints
+    matcher.detectAndComputeKeypoints(imgsG);
+    matcher.cvvPlotKeypoints(imgsC);
+    matcher.trainMatchers();
 
-	// do pairwise, symmetric matching over all image pairs
-	matcher.computePairwiseSymmetricMatches(opts.match_ratio);
-	matcher.cvvVisualizePairwiseMatches(imgsC);
+    // do pairwise, symmetric matching over all image pairs
+    matcher.computePairwiseSymmetricMatches(opts.match_ratio);
+    matcher.cvvVisualizePairwiseMatches(imgsC);
 
-	// build feature tracks
-	matcher.buildAdjacencyListsAndFeatureTracks();
-	vvID tracks;
-	matcher.getTracks(tracks);
-	INFO(tracks.size());
+    // build feature tracks
+    matcher.buildAdjacencyListsAndFeatureTracks();
+    vvID tracks;
+    matcher.getTracks(tracks);
+    INFO(tracks.size());
 //	FeatureTrack::roots_t rootTracks = matcher.tracks.getRootTracks(true);
 //	INFO(rootTracks.size());
 
-    // write pairwise matches to output files
-    char fname[256] = {0};
-    const string fnameFmt = opts.reconstruction_dir + "/measurement/static_measurement_desc%07d.txt";
+// write pairwise matches to output files
+    char fname[256] = { 0 };
+    const string fnameFmt = opts.reconstruction_dir
+            + "/measurement/static_measurement_desc%07d.txt";
 //  boost::filesystem::create_directory(opts.reconstruction_dir);
     int i = -1;
     Mat3b srcImg;
@@ -290,7 +298,7 @@ int main(int argc, char **argv)
             i = srcID.frameID;
             srcImg = (Mat3b)imgsC[i].getMat(ACCESS_READ);
             snprintf(fname, sizeof fname, fnameFmt.c_str(), i);
-            INFO(fname);
+//            INFO(fname);
             CV_Assert(ofs);     // check that the previous file was OK
             ofs.close();        // close previous file
             ofs.open(fname);    // TODO: check ofs is ready for opening?
@@ -374,7 +382,7 @@ int main(int argc, char **argv)
         // compute average descriptor for track
         const int n = track.size();
         Mat trackDescriptors(n, descSize, descType);
-        for(int j=0; j<n; ++j) {
+        for(int j = 0; j < n; ++j) {
             matcher.allDescriptors[track[j].frameID].row(track[j].pointID).copyTo(trackDescriptors.row(j));
         }
         computeAverageDescriptor(trackDescriptors, averageDescriptor);
@@ -383,58 +391,81 @@ int main(int argc, char **argv)
 
         ofs << endl;
 
-        if(i%300 == 0) {
-            printf("Finished writing descriptor % 6i / % 6i (%.1f%%)\n",
-                    i, (int)tracks.size(), i*100.0/tracks.size());
+        if(i % 300 == 0) {
+            printf("Finished writing descriptor % 6i / % 6i (%.1f%%)\n", i, (int)tracks.size(),
+                    i * 100.0 / tracks.size());
         }
     }
     CV_Assert(ofs);
     ofs.close();
 
-	// display tracks
-	{
-		Mat stitched(opts.ci.rows * N, opts.ci.cols, imgsC[0].type());
-		vMat imgTracks(N);
-		for(int i=0; i<N; ++i) {
-			imgTracks[i] = stitched.rowRange(i*opts.ci.rows, (i+1)*opts.ci.rows);
-			CV_DbgAssert(imgTracks[i].rows == imgsC[i].rows);
-			CV_DbgAssert(imgTracks[i].cols == imgsC[i].cols);
-			CV_DbgAssert(imgTracks[i].type() == imgsC[i].type());
-			imgsC[i].copyTo(imgTracks[i]);
-		}
+    // display tracks
+    {
+        Mat stitched(opts.ci.rows * N, opts.ci.cols, imgsC[0].type());
+        vMat imgTracks(N);
+        for(int i = 0; i < N; ++i) {
+            imgTracks[i] = stitched.rowRange(i * opts.ci.rows, (i + 1) * opts.ci.rows);
+            CV_DbgAssert(imgTracks[i].rows == imgsC[i].rows);CV_DbgAssert(imgTracks[i].cols == imgsC[i].cols);CV_DbgAssert(imgTracks[i].type() == imgsC[i].type());
+            imgsC[i].copyTo(imgTracks[i]);
+        }
 
-		for(auto &track : tracks) {
-			if((int)track.size() < N) continue;
+        for(auto &track : tracks) {
+            if((int)track.size() < N)
+                continue;
 //			INFO(track.first.frameID);
 //			INFO(track.first.pointID);
-			sort(track.begin(), track.end());
+            sort(track.begin(), track.end());
 
-			vPoint pts(N);
-			Matx41d c = Scalar::randu(0, 255);
-			Scalar color(c.val[0], c.val[1], c.val[2]);
-			for(int j=0; j<N; ++j) {
-				const ID &id = track[j];
-				pts[j] = matcher.allKeypoints[id.frameID][id.pointID].pt;
+            vPoint pts(N);
+            Matx41d c = Scalar::randu(0, 255);
+            Scalar color(c.val[0], c.val[1], c.val[2]);
+            for(int j = 0; j < N; ++j) {
+                const ID &id = track[j];
+                pts[j] = matcher.allKeypoints[id.frameID][id.pointID].pt;
 //				INFO(pts[j]);
-				pts[j].y += j*opts.ci.rows;
-				circle(stitched, pts[j], 4, color);
-				if(j>0) {
-					arrowedLine(stitched, pts[j-1], pts[j], color);
-				}
-			}
-		}
+                pts[j].y += j * opts.ci.rows;
+                circle(stitched, pts[j], 4, color);
+                if(j > 0) {
+                    arrowedLine(stitched, pts[j - 1], pts[j], color);
+                }
+            }
+        }
+
+
+        // display some statistics about the track lengths
+        vector<double> vTrack_sizes, vTrack_mean_size, vTrack_Stddev_size;
+        map<int, vector<int> > tracksIdxOfLengthHist;
+        map<int, int> trackLengthsHist;
+
+        for(size_t i=0; i<tracks.size(); ++i) {
+            const auto &t = tracks[i];
+            vTrack_sizes.push_back(t.size());
+            tracksIdxOfLengthHist[t.size()].push_back(i);
+            ++trackLengthsHist[t.size()];
+        }
+        INFO(trackLengthsHist);
+        cv::meanStdDev(vTrack_sizes, vTrack_mean_size, vTrack_Stddev_size);
+        INFO(vTrack_mean_size);
+        INFO(vTrack_Stddev_size);
+
+        // longest track(s)
+        const int maxTrackSize = tracksIdxOfLengthHist.rbegin()->first;
+        const vector<int> &vLongestTracksIdx = tracksIdxOfLengthHist.rbegin()->second;
+        INFO(maxTrackSize);
+        INFO(vLongestTracksIdx);
+        INFO(vLongestTracksIdx.size());
 
 #ifdef HAVE_cvv
-		cvv::showImage(stitched, CVVISUAL_LOCATION, "stitched tracks");
+        cvv::showImage(stitched, CVVISUAL_LOCATION, "stitched tracks");
 #endif
-	}
+    }
 
 #ifdef HAVE_cvv
-	// cvv needs this
-	cvv::finalShow();
+    // cvv needs this
+    cvv::finalShow();
 #endif
 
-	return 0;
+    return 0;
 }
 
 //////////////////////////////////////////////////
@@ -442,8 +473,8 @@ int main(int argc, char **argv)
 //////////////////////////////////////////////////
 void usage(int agrc, char** argv)
 {
-	cout << "Usage:" << endl
-			<< '\t' << argv[0] << " <options>.yaml" << endl << endl;
+    cout << "Usage:" << endl
+        << '\t' << argv[0] << " <options>.yaml" << endl << endl;
 }
 
 //////////////////////////////////////////////////
@@ -452,13 +483,13 @@ void usage(int agrc, char** argv)
 static void printRow(ostream &out, InputArray descriptor, const int rowIdx)
 {
     if(descriptor.type() == CV_8UC1) {
-        Mat1b row = (Mat1b) descriptor.getMat(rowIdx);
-        for(int i=0; i<row.cols; ++i) {
-            out << ' ' << +row(i);  // unary + promotes char to int so it is displayed numerically
+        Mat1b row = (Mat1b)descriptor.getMat(rowIdx);
+        for(int i = 0; i < row.cols; ++i) {
+            out << ' ' << +row(i); // unary + promotes char to int so it is displayed numerically
         }
     } else if(descriptor.type() == CV_32FC1) {
-        Mat1f row = (Mat1f) descriptor.getMat(rowIdx);
-        for(int i=0; i<row.cols; ++i) {
+        Mat1f row = (Mat1f)descriptor.getMat(rowIdx);
+        for(int i = 0; i < row.cols; ++i) {
             out << ' ' << row(i);
         }
     } else {
@@ -488,71 +519,74 @@ static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const 
     }
 }
 
-
 //////////////////////////////////////////////////
 // OPTIONS
 //////////////////////////////////////////////////
 Options Options::create(const String &optionsFname)
 {
-	INFO(optionsFname);
+    INFO(optionsFname);
 
     Options ret;
 
     FileStorage &fs = ret.fs;
-	fs.open(optionsFname, FileStorage::READ);
-	if(!fs.isOpened()) {
-		cout << "could not open file \"" << optionsFname
-			<< "\" for reading.";
-		exit(-2);
-	}
+    fs.open(optionsFname, FileStorage::READ);
+    if(!fs.isOpened()) {
+        cout << "could not open file \"" << optionsFname << "\" for reading.";
+        exit(-2);
+    }
 
-	ret.data_dir = (string)fs["data_dir"];
-	ret.imgs_glob = (string)fs["imgs_glob"];
-	ret.begin_idx = (int)fs["begin_idx"];
-	ret.end_idx = (int)fs["end_idx"];
+    ret.data_dir = (string)fs["data_dir"];
+    ret.imgs_glob = (string)fs["imgs_glob"];
+    ret.begin_idx = (int)fs["begin_idx"];
+    ret.end_idx = (int)fs["end_idx"];
 
-	string calib_fname = ret.data_dir + (string)fs["calib_fname"];
-	INFO(calib_fname);
-	FileStorage calibFS(calib_fname, FileStorage::READ|FileStorage::FORMAT_YAML);
-	ret.ci.K  <<
-			(double)calibFS["Fx"], 0.0, (double)calibFS["Px"],
-			0.0, (double)calibFS["Fy"], (double)calibFS["Py"],
-			0.0, 0.0, 1.0;
-	ret.ci.k  <<
-			(double)calibFS["k1"],
-			(double)calibFS["k2"],
-			(double)calibFS["k3"],
-			(double)calibFS["k4"],
-			(double)calibFS["k5"],
-      calibFS["k6"].isNone() ? 0.0 : (double)calibFS["k6"],
-      calibFS["k7"].isNone() ? 0.0 : (double)calibFS["k7"],
-      calibFS["k8"].isNone() ? 0.0 : (double)calibFS["k8"];
-	ret.ci.rows = (int)calibFS["ImageH"];
-	ret.ci.cols = (int)calibFS["ImageW"];
+    string calib_fname = ret.data_dir + (string)fs["calib_fname"];
+    INFO(calib_fname);
+    FileStorage calibFS(calib_fname, FileStorage::READ | FileStorage::FORMAT_YAML);
+    ret.ci.K <<
+                (double)calibFS["Fx"], 0.0, (double)calibFS["Px"],
+                0.0, (double)calibFS["Fy"], (double)calibFS["Py"],
+                0.0, 0.0, 1.0;
+    ret.ci.k <<
+                                           (double)calibFS["k1"],
+                                           (double)calibFS["k2"],
+                                           (double)calibFS["k3"],
+                                           (double)calibFS["k4"],
+                                           (double)calibFS["k5"],
+            calibFS["k6"].isNone() ? 0.0 : (double)calibFS["k6"],
+            calibFS["k7"].isNone() ? 0.0 : (double)calibFS["k7"],
+            calibFS["k8"].isNone() ? 0.0 : (double)calibFS["k8"];
+    ret.ci.rows = (int)calibFS["ImageH"];
+    ret.ci.cols = (int)calibFS["ImageW"];
 
-	ret.detector_options = fs["detector"];
-	ret.detector_name = (String)ret.detector_options["name"];
+    ret.detector_options = fs["detector"];
+    ret.detector_name = (String)ret.detector_options["name"];
     ret.reconstruction_dir = ret.data_dir + "/reconstruction-" + ret.detector_name;
 
-	ret.extractor_options = fs["extractor"];
-	if(ret.extractor_options.isMap()) {
+    ret.extractor_options = fs["extractor"];
+    if(ret.extractor_options.isMap()) {
         ret.extractor_name = (String)ret.extractor_options["name"];
         ret.detector_same_as_extractor = false;
-	} else if(ret.extractor_options.isString() && (String)ret.extractor_options == "DETECTOR_SAME_AS_EXTRACTOR") {
-	    ret.extractor_name = ret.detector_name;
-	    ret.extractor_options = ret.detector_options;
-	    ret.detector_same_as_extractor = true;
-	} else {
-	    CV_Error(Error::StsParseError, "Expected \"extractor\" to be a map similar to \"detector\", "
-	            "or the string \"DETECTOR_SAME_AS_EXTRACTOR\".");
-	}
+    } else if(ret.extractor_options.isString()
+            && (String)ret.extractor_options == "DETECTOR_SAME_AS_EXTRACTOR") {
+        ret.extractor_name = ret.detector_name;
+        ret.extractor_options = ret.detector_options;
+        ret.detector_same_as_extractor = true;
+    } else {
+        CV_Error(Error::StsParseError,
+                "Expected \"extractor\" to be a map similar to \"detector\", "
+                        "or the string \"DETECTOR_SAME_AS_EXTRACTOR\".");
+    }
 
-	ret.matcher_name = (String)fs["matcher"]["name"];
-	ret.matcher_options = fs["matcher"]["options"];
+    ret.matcher_name = (String)fs["matcher"]["name"];
+    ret.matcher_options = fs["matcher"]["options"];
 
-	ret.match_ratio = (double)fs["match_ratio"];
+    ret.match_ratio = (double)fs["match_ratio"];
 
-	return ret;
+    ret.min_keypoint_distance = fs["min_keypoint_distance"].isNone()
+        ? 0.0 : (double)fs["min_keypoint_distance"];
+
+    return ret;
 }
 
 //////////////////////////////////////////////////
@@ -562,97 +596,170 @@ SfMMatcher SfMMatcher::create(const Options &opts)
 {
     CV_Assert(opts.fs.isOpened());
 
-	SfMMatcher ret;
+    SfMMatcher ret;
 
-	ret.ci = opts.ci;
+    ret.ci = opts.ci;
+    ret.min_keypoint_distance = opts.min_keypoint_distance;
 
-	if(opts.detector_same_as_extractor) {
-	    INFO(opts.detector_name);
-	    ret.feature2d = Feature2D::create<Feature2D>(opts.detector_name);
-	    ret.feature2d->read(opts.detector_options);
-	} else {
-	    INFO(opts.detector_name);
-	    INFO(opts.extractor_name);
-	    ret.detector = FeatureDetector::create<FeatureDetector>(opts.detector_name);
-	    ret.detector->read(opts.detector_options);
+    if(ret.min_keypoint_distance > 0.0) {
+        const int M = ret.ci.rows / ret.min_keypoint_distance;
+        const int N = ret.ci.cols / ret.min_keypoint_distance;
+        ret.grid.resize(M + 2, vvKPp(N + 2));
+    }
+
+    if(opts.detector_same_as_extractor) {
+        INFO(opts.detector_name);
+        ret.feature2d = Feature2D::create<Feature2D>(opts.detector_name);
+        ret.feature2d->read(opts.detector_options);
+        if(opts.min_keypoint_distance > 0.0) {
+            ret.detector = ret.extractor = ret.feature2d;
+            ret.feature2d.release();
+        }
+    } else {
+        INFO(opts.detector_name);
+        INFO(opts.extractor_name);
+        ret.detector = FeatureDetector::create<FeatureDetector>(opts.detector_name);
+        ret.detector->read(opts.detector_options);
         ret.extractor = DescriptorExtractor::create<DescriptorExtractor>(opts.extractor_name);
         ret.extractor->read(opts.extractor_options);
-	}
+    }
 
-	INFO(opts.matcher_name);
-	ret.matcherTemplate = DescriptorMatcher::create(opts.matcher_name);
-	ret.matcherTemplate->read(opts.matcher_options);
+    INFO(opts.matcher_name);
+    ret.matcherTemplate = DescriptorMatcher::create(opts.matcher_name);
+    ret.matcherTemplate->read(opts.matcher_options);
 
-	DEBUG(ret.detector.get());
-	DEBUG(ret.extractor.get());
-	DEBUG(ret.feature2d.get());
-	DEBUG(ret.matcherTemplate.get());
+    DEBUG(ret.detector.get());
+    DEBUG(ret.extractor.get());
+    DEBUG(ret.feature2d.get());
+    DEBUG(ret.matcherTemplate.get());
 
-	CV_Assert((ret.detector.empty() && ret.extractor.empty())
-			^ ret.feature2d.empty());
-	{
-		ORB *orb = dynamic_cast<ORB*>(ret.feature2d.get());
-		if(orb) {
+    CV_Assert((ret.detector.empty() && ret.extractor.empty()) ^ ret.feature2d.empty());
+    {
+        ORB *orb = dynamic_cast<ORB*>(ret.feature2d.get());
+        if(orb) {
 //			orb->setMaxFeatures(5000);
-			DEBUG(orb->getMaxFeatures());
-			DEBUG(orb->getScaleFactor());
-			DEBUG(orb->getNLevels());
-			DEBUG(orb->getEdgeThreshold());
-			DEBUG(orb->getFirstLevel());
-			DEBUG(orb->getWTA_K());
-			DEBUG(orb->getScoreType());
-			DEBUG(orb->getPatchSize());
-			DEBUG(orb->getFastThreshold());
-		}
-	}
+            DEBUG(orb->getMaxFeatures());
+            DEBUG(orb->getScaleFactor());
+            DEBUG(orb->getNLevels());
+            DEBUG(orb->getEdgeThreshold());
+            DEBUG(orb->getFirstLevel());
+            DEBUG(orb->getWTA_K());
+            DEBUG(orb->getScoreType());
+            DEBUG(orb->getPatchSize());
+            DEBUG(orb->getFastThreshold());
+        }
+    }
 
-	CV_Assert(!ret.matcherTemplate.empty());
+    CV_Assert(!ret.matcherTemplate.empty());
 
-	return ret;
+    return ret;
 }
 
-void SfMMatcher::detectAndComputeKeypoints( const vUMat &images )
+void SfMMatcher::pruneDuplicateKeypoints(vKeyPoint &keypoints)
 {
-	const int N = images.size();
-	allKeypoints.resize(N);
-	allDescriptors.resize(N);
+    CV_Assert(min_keypoint_distance > 0.0);
+    const int M = ci.rows / max(min_keypoint_distance, 2.0);
+    const int N = ci.cols / max(min_keypoint_distance, 2.0);
+    CV_DbgAssert((int)grid.size() == M+2);
+    for(auto &row : grid) {
+        CV_DbgAssert((int)row.size() == N+2);
+        for(auto &cell : row) {
+            cell.clear();
+        }
+    }
+
+    enum { SUPPRESSED = -10 };
+
+    for(KeyPoint &kp : keypoints) {
+        // compute cell location
+        const int gx = kp.pt.x / min_keypoint_distance + 1;
+        const int gy = kp.pt.y / min_keypoint_distance + 1;
+        CV_DbgAssert(gx > 0);
+        CV_DbgAssert(gx <= N);
+        CV_DbgAssert(gy > 0);
+        CV_DbgAssert(gy <= M);
+
+        // compute bounding box around kp
+        Rect2f r(kp.pt.x - min_keypoint_distance, kp.pt.y - min_keypoint_distance,
+                min_keypoint_distance * 2.0, min_keypoint_distance * 2.0);
+
+        // check surrounding cells for suppressant, or suppress all
+        for(int y = gy - 1; y <= gy + 1; ++y) {
+            CV_DbgAssert(y >= 0);CV_DbgAssert(y <= M+1);
+            for(int x = gx - 1; x <= gx + 1; ++x) {
+                CV_DbgAssert(x >= 0);CV_DbgAssert(x <= N+1);
+                for(KeyPoint *p : grid[y][x]) {
+                    if(p->pt.inside(r)) {
+                        // kp overlaps with *p, so suppress one
+                        if(kp.response > p->response) {
+                            p->class_id = SUPPRESSED;
+                        } else {
+                            kp.class_id = SUPPRESSED;
+                        }
+                    }
+                }
+            }
+        }
+
+        // add to cell
+        grid[gy][gx].push_back(&kp);
+    }
+
+    // remove suppressed keypoints
+    auto newEnd = remove_if(keypoints.begin(), keypoints.end(),
+            [](const KeyPoint &kp) {return kp.class_id == SUPPRESSED;});
+    DEBUG(keypoints.size());
+    keypoints.resize(newEnd - keypoints.begin());
+    DEBUG(keypoints.size());
+}
+
+void SfMMatcher::detectAndComputeKeypoints(const vUMat &images)
+{
+    const int N = images.size();
+    allKeypoints.resize(N);
+    allDescriptors.resize(N);
     distortedKPcoords.resize(N);
     undistortedKPcoords.resize(N);
 
-	InputArray emptymask = noArray();
+    InputArray emptymask = noArray();
 
-	const bool combined = !!feature2d;
+    const bool combined = !!feature2d;
 
-	for(int i=0; i<N; ++i) {
-		if(combined) {
-			feature2d->detectAndCompute(images[i], emptymask, allKeypoints[i], allDescriptors[i]);
-		} else {
-			detector->detect(images[i], allKeypoints[i], emptymask);
-			extractor->compute(images[i], allKeypoints[i], allDescriptors[i]);
-		}
-		const int n = allKeypoints[i].size();
-		if(0 == n) {
-		    WARN(i);
-		    WARN_STR("no keypoints found");
-		    continue;
-		}
-		distortedKPcoords[i] = Mat2f(n,1,
-		        reinterpret_cast<Vec2f*>(&allKeypoints[i][0].pt), sizeof(KeyPoint));
-		undistortedKPcoords[i].create(n,1);
-	    undistortPoints(distortedKPcoords[i].clone(), undistortedKPcoords[i],
-	            ci.K, ci.k, noArray(), ci.K);
-	    printf("Image % 4i / %i (%.1f%%). Found %i descriptors\n", i, N, 100.0 * i / N, n);
-	}
+    for(int i = 0; i < N; ++i) {
+        if(combined) {
+            CV_DbgAssert(!min_keypoint_distance>0.0);
+            feature2d->detectAndCompute(images[i], emptymask, allKeypoints[i], allDescriptors[i]);
+        } else {
+            detector->detect(images[i], allKeypoints[i], emptymask);
+            if(min_keypoint_distance > 0.0)
+                pruneDuplicateKeypoints(allKeypoints[i]);
+            extractor->compute(images[i], allKeypoints[i], allDescriptors[i]);
+        }
+        const int n = allKeypoints[i].size();
+        if(0 == n) {
+            WARN(i);
+            WARN_STR("no keypoints found");
+            continue;
+        }
+        distortedKPcoords[i] = Mat2f(n, 1, reinterpret_cast<Vec2f*>(&allKeypoints[i][0].pt),
+                sizeof(KeyPoint));
+        undistortedKPcoords[i].create(n, 1);
+        undistortPoints(distortedKPcoords[i].clone(), undistortedKPcoords[i], ci.K, ci.k, noArray(),
+                ci.K);
+        printf("Image % 4i / %i (%.1f%%). Found %i descriptors\n", i + 1, N, 100.0 * (i + 1) / N,
+                n);
+    }
 }
 
 void SfMMatcher::trainMatchers()
 {
     const int N = allDescriptors.size();
     matchers.resize(N);
-    for(int i=0; i<N; ++i) {
+    for(int i = 0; i < N; ++i) {
         matchers[i] = matcherTemplate->clone(true);
         matchers[i]->add(allDescriptors[i]);
         matchers[i]->train();
+        printf("Train % 4i / %i (%.1f%%).\n", i + 1, N, 100.0 * (i + 1) / N);
     }
 }
 
@@ -662,33 +769,32 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
     const int N = allDescriptors.size();
     pairwiseMatches.resize(N, vector<vDMatch>(N));
     // TODO: make this parallel
-    for (int i = 0; i < N; ++i) {
-        for (int j = i+1; j < N; ++j) {
+    for(int i = 0; i < N; ++i) {
+        for(int j = i + 1; j < N; ++j) {
             INFO(i);
             INFO(j);
 
-            getSymmetricMatches(matchers[i], matchers[j], allDescriptors[i],
-                    allDescriptors[j], pairwiseMatches[i][j],
-                    pairwiseMatches[j][i], match_ratio);
+            getSymmetricMatches(matchers[i], matchers[j], allDescriptors[i], allDescriptors[j],
+                    pairwiseMatches[i][j], pairwiseMatches[j][i], match_ratio);
             INFO(pairwiseMatches[i][j].size());
         }
     }
 }
 
 #ifdef HAVE_cvv
-template <typename MAT>
-static void cvvVisualizePairwiseMatchesImpl(const vector<MAT> &imgs,
-        const vvKeyPoint &allKeypoints, const vector<vector<vDMatch>> &pairwiseMatches)
+template<typename MAT>
+static void cvvVisualizePairwiseMatchesImpl(const vector<MAT> &imgs, const vvKeyPoint &allKeypoints,
+        const vector<vector<vDMatch>> &pairwiseMatches)
 {
     const int N = imgs.size();
     char description[100];
-    for (int i = 0; i < N; ++i) {
-        const int jMax = N > 10 ? i : 1;
-        for (int j = 0; j < jMax; ++j) {
-            snprintf(description, sizeof(description),
-                    "symmetric matches %i  %i", i, j);
-            cvv::debugDMatch(imgs[i], allKeypoints[i], imgs[j],
-                    allKeypoints[j], pairwiseMatches[i][j],
+    for(int i = 0; i < N; ++i) {
+        const int jMin = max(i - 5, 0);
+        const int jMax = min(i + 5, i);
+        for(int j = jMin; j < jMax; ++j) {
+            snprintf(description, sizeof(description), "symmetric matches %i  %i", i, j);
+            cvv::debugDMatch(imgs[i], allKeypoints[i], imgs[j], allKeypoints[j],
+                    pairwiseMatches[i][j],
                     CVVISUAL_LOCATION, description);
         }
     }
@@ -735,7 +841,6 @@ void SfMMatcher::cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const
 //    INFO(match_adjacency_lists.size());
 //}
 
-
 void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
 {
     const int N = pairwiseMatches.size();
@@ -744,12 +849,15 @@ void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
     Tracks &t = *tracks;
     match_adjacency_lists.clear();
 
-    for(int i=0; i<N; ++i) {
-        for(int j=i+1; j<N; ++j) {
+    int canMerge = 0;
+    int cantMerge = 0;
+    for(int i = 0; i < N; ++i) {
+        for(int j = i + 1; j < N; ++j) {
             for(const DMatch &m : pairwiseMatches[i][j]) {
                 const ID f1 = { i, m.queryIdx };
                 const ID f2 = { j, m.trainIdx };
                 match_adjacency_lists[f1].insert(f2);
+                //match_adjacency_lists[f2].insert(f1);
                 if(t.isInSomeTrack(f2)) {
                     if(t.isInSomeTrack(f1)) {
                         if(t.rootID(f1) == t.rootID(f2)) {
@@ -757,9 +865,10 @@ void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
                         } else {
                             // f1 and f2 already in different tracks
                             // TODO: merge tracks?!?!?
-                            if(t.canMerge(t.rootID(f1), t.rootID(f2))) {
-                                t.merge(t.rootID(f1), t.rootID(f2));
+                            if(t.tryMerge(t.rootID(f1), t.rootID(f2))) {
+                                ++canMerge;
                             } else {
+                                ++cantMerge;
                                 DEBUG_STR("STUB");
                                 DEBUG(i);
                                 DEBUG(j);
@@ -787,6 +896,8 @@ void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
         } // for(int j=i+1; j<N; ++j)
     } // for(int i=0; i<N; ++i)
     INFO(match_adjacency_lists.size());
+    INFO(canMerge);
+    INFO(cantMerge);
 } // void SfMMatcher::buildAdjacencyListsAndFeatureTracks()
 
 static inline bool frameLess(const int a, const ID b)
@@ -805,9 +916,9 @@ void SfMMatcher::getTracks(vvID &tracks_)
         auto w = r;                     // write iterator
         const auto e = track.end();     // end iterator
         CV_DbgAssert(is_sorted(r, e));
-        while(r!=e) {
+        while (r != e) {
             const short i = r->frameID;
-            auto r2 = std::find_if_not(r+1, e, [=](const ID id) { return id.frameID == i; });
+            auto r2 = std::find_if_not(r + 1, e, [=](const ID id) {return id.frameID == i;});
             CV_DbgAssert(r2 - r > 0);
             if(r2 - r > 1) {
                 // TODO: the elements [r, r2) have the same frameID. pick only 1 of them, discard the rest
@@ -830,15 +941,18 @@ void SfMMatcher::getTracks(vvID &tracks_)
 } // void SfMMatcher::getTracks(vvID &tracks_)
 
 #ifdef HAVE_cvv
-template <typename MAT>
+template<typename MAT>
 static void cvvPlotKeypointsImpl(const vector<MAT> &imgs, const vvKeyPoint &allKeypoints,
         const Scalar &color, int flags)
 {
+    if(!cvv::debugMode())
+        return;
+
     CV_Assert(allKeypoints.size() == imgs.size());
     const int N = imgs.size();
     MAT m;
     char buf[80];
-    for(int i=0; i<N; ++i) {
+    for(int i = 0; i < N; ++i) {
         drawKeypoints(imgs[i], allKeypoints[i], m, color, flags);
         snprintf(buf, sizeof buf, "keypoints for image %i", i);
         cvv::showImage(m, CVVISUAL_LOCATION, buf);
@@ -846,10 +960,12 @@ static void cvvPlotKeypointsImpl(const vector<MAT> &imgs, const vvKeyPoint &allK
 }
 #endif // HAVE_cvv
 
-void SfMMatcher::cvvPlotKeypoints(InputArrayOfArrays _imgs,
-        const Scalar &color, int flags) const
+void SfMMatcher::cvvPlotKeypoints(InputArrayOfArrays _imgs, const Scalar &color, int flags) const
 {
 #ifdef HAVE_cvv
+    if(!cvv::debugMode())
+        return;
+
     if(_imgs.isMatVector()) {
         vMat imgs;
         _imgs.getMatVector(imgs);
@@ -865,7 +981,6 @@ void SfMMatcher::cvvPlotKeypoints(InputArrayOfArrays _imgs,
     WARN_STR("STUB: CVV is not available");
 #endif
 }
-
 
 ////////////////////////////////////////////////////
 //// FEATURE TRACKS
@@ -950,40 +1065,40 @@ void SfMMatcher::cvvPlotKeypoints(InputArrayOfArrays _imgs,
 // I/O
 //////////////////////////////////////////////////
 
-template <typename MATX>
+template<typename MATX>
 ostream& operator<=(ostream &out, const MATX &m)
 {
-	for(int i=0; i<MATX::channels; ++i) {
-		out << ' ' << m.val[i];
-	}
-	return out;
+    for(int i = 0; i < MATX::channels; ++i) {
+        out << ' ' << m.val[i];
+    }
+    return out;
 }
 
-template <typename MATX>
+template<typename MATX>
 istream& operator>=(istream &in, MATX &m)
 {
-	for(int i=0; i<MATX::channels; ++i) {
-		in >> m.val[i];
-	}
-	return in;
+    for(int i = 0; i < MATX::channels; ++i) {
+        in >> m.val[i];
+    }
+    return in;
 }
 
 ostream& operator<<(ostream &out, const PoseWithVel &odo)
 {
-	streamsize oldWidth = out.width();
-	char oldFill = out.fill();
-	return (out << odo.stamp.sec << '.' << setw(9) << setfill('0') << odo.stamp.nsec
-			<< setw(oldWidth) << setfill(oldFill))
-			<= odo.pos     <= odo.ori     <= odo.pose_cov
-			<= odo.vel_lin <= odo.vel_ang <= odo.vel_cov;
+    streamsize oldWidth = out.width();
+    char oldFill = out.fill();
+    return (out << odo.stamp.sec << '.' << setw(9) << setfill('0') << odo.stamp.nsec
+            << setw(oldWidth) << setfill(oldFill))
+            <= odo.pos     <= odo.ori     <= odo.pose_cov
+            <= odo.vel_lin <= odo.vel_ang <= odo.vel_cov;
 }
 
 istream& operator>>(istream &in, PoseWithVel &odo)
 {
-	char dummy;
-	return (in >> odo.stamp.sec >> dummy >> odo.stamp.nsec)
-			>= odo.pos    >= odo.ori     >= odo.pose_cov
-			>= odo.vel_lin >= odo.vel_ang >= odo.vel_cov;
+    char dummy;
+    return (in >> odo.stamp.sec >> dummy >> odo.stamp.nsec)
+            >= odo.pos    >= odo.ori     >= odo.pose_cov
+            >= odo.vel_lin >= odo.vel_ang >= odo.vel_cov;
 }
 
 ::std::ostream& operator<<( ::std::ostream &out, const Options &o)
@@ -1001,7 +1116,8 @@ istream& operator>>(istream &in, PoseWithVel &odo)
 			// TODO: output extractor options
 			<< NV(o.matcher_name) << endl
 			// TODO: output matcher options
-			<< NV(o.match_ratio);
+			<< NV(o.match_ratio)
+			<< NV(o.min_keypoint_distance);
 }
 
 //::std::ostream& operator<<( ::std::ostream &out, const ::cv::ID &id)

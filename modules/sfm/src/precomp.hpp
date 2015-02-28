@@ -48,6 +48,8 @@
 #include "opencv2/core/ocl.hpp"
 
 #include <algorithm>
+#include <functional>
+#include <unordered_map>
 
 #include "../samples/logging.h"
 
