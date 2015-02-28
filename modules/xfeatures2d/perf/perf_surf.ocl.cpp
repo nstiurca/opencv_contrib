@@ -61,7 +61,9 @@ typedef perf::TestBaseWithParam<std::string> OCL_SURF;
     "perf/outdoor_800x600.png",\
     "perf/outdoor_1280x1024.png",\
     "perf/indoor_752x480.png",\
-    "perf/indoor_1280x960.png"
+    "perf/indoor_1280x960.png",\
+    "perf/indoor_1288x964.png"
+
 
 PERF_TEST_P(OCL_SURF, DISABLED_with_data_transfer, testing::Values(SURF_IMAGES))
 {
