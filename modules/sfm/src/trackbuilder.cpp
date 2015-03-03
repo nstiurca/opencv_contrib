@@ -46,7 +46,9 @@ protected:
 
     // temporary data
     std::vector<Ptr<DescriptorMatcher> > matchers;
-    std::vector<std::vector<vDMatch> > pairwiseMatches;
+//    std::vector<std::vector<vDMatch> > pairwiseMatches;
+    vDMatch pairwiseMatches_ij, pairwiseMatches_ji;
+    std::vector<std::vector<vID> > adjacencyLists;
 //    Ptr<Tracks> tracks;
 };
 
@@ -132,6 +134,7 @@ void SimpleTrackBuilder_Impl::detectAndComputeMatches(const std::vector<MAT_I> &
     allDescriptors.resize(N);
     allKeypoints.resize(N);
     matchers.resize(N);
+    adjacencyLists.resize(N);
 
     // TODO: make this parallel
     for(int i=0; i<N; ++i) {
@@ -139,78 +142,120 @@ void SimpleTrackBuilder_Impl::detectAndComputeMatches(const std::vector<MAT_I> &
         const bool useProvidedKeypoints = false;
         detector->detectAndCompute(images[i], noArray(), allKeypoints[i],
                 allDescriptors[i], useProvidedKeypoints);
+        CV_DbgAssert((int)allKeypoints[i].size() == allDescriptors[i].rows);
+        const int M = allDescriptors[i].rows;
 
         // matcher training
         const bool emptyTrainData = true;
         matchers[i] = matcher->clone(emptyTrainData);
         matchers[i]->add(allDescriptors[i]);
         matchers[i]->train();
+
+        adjacencyLists[i].resize(M);
+        for(int i=0; i<M; ++i) {
+            adjacencyLists[i].clear();
+        }
     }
 
     // compute pairwise symmetric matches
-    pairwiseMatches.resize(N, std::vector<vDMatch>(N));
+//    pairwiseMatches.resize(N, std::vector<vDMatch>(N));
     // TODO: make this parallel
     for (int i = 0; i < N; ++i) {
         for (int j = i+1; j < N; ++j) {
             getSymmetricMatches(matchers[i], matchers[j], allDescriptors[i],
-                    allDescriptors[j], pairwiseMatches[i][j],
-                    pairwiseMatches[j][i], ratio_threshold);
+                    allDescriptors[j], pairwiseMatches_ij,
+                    pairwiseMatches_ji, ratio_threshold);
+            CV_DbgAssert(pairwiseMatches_ij.size() == pairwiseMatches_ji.size());
+            for(const DMatch &m : pairwiseMatches_ij) {
+                const ID f1 = { i, m.queryIdx };
+                const ID f2 = { j, m.trainIdx };
+                adjacencyLists[i][m.queryIdx].push_back(f2);
+                adjacencyLists[j][m.trainIdx].push_back(f1);
+
+            }
+        }
+    }
+
+    // sanity check: adjacency lists should have entirely unique and sorted members
+    for(const auto &al : adjacencyLists) {
+        for(const auto &track : al) {
+            CV_DbgAssert(is_sorted(track.begin(), track.end()));
+            CV_DbgAssert(adjacent_find(track.begin(), track.end()) == track.end());
         }
     }
 }
 
 void SimpleTrackBuilder_Impl::buildTracksFromPairwiseMatches(vvID &tracks)
 {
-    const int N = pairwiseMatches.size();
+    tracks.clear();
+    for(size_t i=0; i<adjacencyLists.size(); ++i) {
+        DEBUG(i);
+        const auto &al = adjacencyLists[i];
+        for(size_t j=0; j<al.size(); ++j) {
+            DEBUG(j);
+            const auto &track = al[j];
+            if(track.empty()) continue;
+            if(track[0].frameID > (int)i) {
+                tracks.push_back(vID(1, {i, j}));
+                tracks.back().insert(tracks.back().end(), track.begin(), track.end());
+                DEBUG(tracks.back().size());
+            }
+        }
+    }
+    DEBUG(tracks.size());
 
-    Ptr<Tracks> pTracks = Tracks::create();
-    Tracks &t = *pTracks;
-//    match_adjacency_lists.clear();
+    // TODO: merge tracks?
 
-    for(int i=0; i<N; ++i) {
-        for(int j=i+1; j<N; ++j) {
-            for(const DMatch &m : pairwiseMatches[i][j]) {
-                const ID f1 = { i, m.queryIdx };
-                const ID f2 = { j, m.trainIdx };
-//                match_adjacency_lists[f1].insert(f2);
-                if(t.isInSomeTrack(f2)) {
-                    if(t.isInSomeTrack(f1)) {
-                        if(t.rootID(f1) == t.rootID(f2)) {
-                            // same track already; do nothing
-                        } else {
-                            // f1 and f2 already in different tracks
-                            // TODO: merge tracks?!?!?
-                            if(t.canMerge(t.rootID(f1), t.rootID(f2))) {
-                                t.merge(t.rootID(f1), t.rootID(f2));
-                            } else {
-                                WARN_STR("STUB");
-                                WARN(i);
-                                WARN(j);
-//                                WARN(f1);
-//                                WARN(f2);
-//                                WARN(t.track(f1));
-//                                WARN(t.track(f2));
-                            }
-                        }
-                    } else {
-                        // add f1 to f2's track
-                        t.addToTrack(f1, f2);
-                    }
-                } else {
-                    // f2 has no parent/root, so add to a (possibly new) track
-                    if(t.isInSomeTrack(f1)) {
-                        // add f2 to f1's track
-                        t.addToTrack(f2, f1);
-                    } else {
-                        // new track of f1 and f2
-                        t.makeNewTrack(f1, f2);
-                    }
-                } // if(isInSomeTrack(f2) {} else {}
-            } // for(const DMatch &m : pairwiseMatches[i][j])
-        } // for(int j=i+1; j<N; ++j)
-    } // for(int i=0; i<N; ++i)
-
-    t.getTracks(tracks);
+//    const int N = pairwiseMatches.size();
+//
+//    Ptr<Tracks> pTracks = Tracks::create();
+//    Tracks &t = *pTracks;
+////    match_adjacency_lists.clear();
+//
+//    for(int i=0; i<N; ++i) {
+//        for(int j=i+1; j<N; ++j) {
+//            for(const DMatch &m : pairwiseMatches[i][j]) {
+//                const ID f1 = { i, m.queryIdx };
+//                const ID f2 = { j, m.trainIdx };
+////                match_adjacency_lists[f1].insert(f2);
+//                if(t.isInSomeTrack(f2)) {
+//                    if(t.isInSomeTrack(f1)) {
+//                        if(t.rootID(f1) == t.rootID(f2)) {
+//                            // same track already; do nothing
+//                        } else {
+//                            // f1 and f2 already in different tracks
+//                            // TODO: merge tracks?!?!?
+//                            if(t.canMerge(t.rootID(f1), t.rootID(f2))) {
+//                                t.merge(t.rootID(f1), t.rootID(f2));
+//                            } else {
+//                                WARN_STR("STUB");
+//                                WARN(i);
+//                                WARN(j);
+////                                WARN(f1);
+////                                WARN(f2);
+////                                WARN(t.track(f1));
+////                                WARN(t.track(f2));
+//                            }
+//                        }
+//                    } else {
+//                        // add f1 to f2's track
+//                        t.addToTrack(f1, f2);
+//                    }
+//                } else {
+//                    // f2 has no parent/root, so add to a (possibly new) track
+//                    if(t.isInSomeTrack(f1)) {
+//                        // add f2 to f1's track
+//                        t.addToTrack(f2, f1);
+//                    } else {
+//                        // new track of f1 and f2
+//                        t.makeNewTrack(f1, f2);
+//                    }
+//                } // if(isInSomeTrack(f2) {} else {}
+//            } // for(const DMatch &m : pairwiseMatches[i][j])
+//        } // for(int j=i+1; j<N; ++j)
+//    } // for(int i=0; i<N; ++i)
+//
+//    t.getTracks(tracks);
 }
 
 void SimpleTrackBuilder_Impl::mergeDuplicateKeypointsInTracks(const vvKeyPoint &allKeypoints,
