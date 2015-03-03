@@ -57,8 +57,6 @@ public:
     void setUpright(bool upright_) { upright = upright_; }
     bool getUpright() const { return upright; }
 
-    virtual AlgorithmInfo* info() const;
-
     double hessianThreshold;
     int nOctaves;
     int nOctaveLayers;

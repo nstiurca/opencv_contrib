@@ -41,21 +41,3 @@
 //M*/
 
 #include "precomp.hpp"
-
-namespace cv
-{
-namespace xfeatures2d
-{
-
-bool initModule_xfeatures2d()
-{
-    Ptr<Feature2D> f;
-
-    f = SURF::create();
-    f->info();
-
-    return true;
-}
-
-} // namespace xfeatures2d
-} // namespace cv
