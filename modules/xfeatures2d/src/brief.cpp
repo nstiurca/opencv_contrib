@@ -72,17 +72,12 @@ public:
 
     virtual void compute(InputArray image, std::vector<KeyPoint>& keypoints, OutputArray descriptors);
 
-    virtual AlgorithmInfo* info() const;
-
 protected:
     typedef void(*PixelTestFn)(InputArray, const std::vector<KeyPoint>&, OutputArray);
     
     int bytes_;
     PixelTestFn test_fn_;
 };
-
-CV_INIT_ALGORITHM(BriefDescriptorExtractorImpl, "Feature2D.BriefDescriptorExtractor",
-    obj.info()->addParam(obj, "bytes", obj.bytes_))
 
 Ptr<BriefDescriptorExtractor> BriefDescriptorExtractor::create( int bytes )
 {

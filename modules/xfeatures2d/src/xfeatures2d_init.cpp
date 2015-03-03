@@ -51,18 +51,6 @@ bool initModule_xfeatures2d()
 {
     Ptr<Feature2D> f;
 
-    f = FREAK::create();
-    f->info();
-
-    f = StarDetector::create();
-    f->info();
-
-    f = BriefDescriptorExtractor::create();
-    f->info();
-
-    f = SIFT::create();
-    f->info();
-
     f = SURF::create();
     f->info();
 

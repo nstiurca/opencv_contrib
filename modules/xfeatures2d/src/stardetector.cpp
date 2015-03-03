@@ -62,8 +62,6 @@ public:
 
     void detect( InputArray image, std::vector<KeyPoint>& keypoints, InputArray mask=noArray() );
 
-    virtual AlgorithmInfo* info() const;
-
 protected:
     int maxSize;
     int responseThreshold;
@@ -71,13 +69,6 @@ protected:
     int lineThresholdBinarized;
     int suppressNonmaxSize;
 };
-
-CV_INIT_ALGORITHM(StarDetectorImpl, "Feature2D.StarDetector",
-    obj.info()->addParam(obj, "maxSize", obj.maxSize);
-    obj.info()->addParam(obj, "responseThreshold", obj.responseThreshold);
-    obj.info()->addParam(obj, "lineThresholdProjected", obj.lineThresholdProjected);
-    obj.info()->addParam(obj, "lineThresholdBinarized", obj.lineThresholdBinarized);
-    obj.info()->addParam(obj, "suppressNonmaxSize", obj.suppressNonmaxSize))
 
 Ptr<StarDetector> StarDetector::create(int _maxSize,
                                        int _responseThreshold,

@@ -144,8 +144,6 @@ public:
     void findScaleSpaceExtrema( const std::vector<Mat>& gauss_pyr, const std::vector<Mat>& dog_pyr,
                                std::vector<KeyPoint>& keypoints ) const;
 
-    virtual AlgorithmInfo* info() const;
-
 protected:
     CV_PROP_RW int nfeatures;
     CV_PROP_RW int nOctaveLayers;
@@ -153,13 +151,6 @@ protected:
     CV_PROP_RW double edgeThreshold;
     CV_PROP_RW double sigma;
 };
-
-CV_INIT_ALGORITHM(SIFT_Impl, "Feature2D.SIFT",
-    obj.info()->addParam(obj, "nfeatures", obj.nfeatures);
-    obj.info()->addParam(obj, "nOctaveLayers", obj.nOctaveLayers);
-    obj.info()->addParam(obj, "contrastThreshold", obj.contrastThreshold);
-    obj.info()->addParam(obj, "edgeThreshold", obj.edgeThreshold);
-    obj.info()->addParam(obj, "sigma", obj.sigma))
 
 Ptr<SIFT> SIFT::create( int _nfeatures, int _nOctaveLayers,
                      double _contrastThreshold, double _edgeThreshold, double _sigma )
