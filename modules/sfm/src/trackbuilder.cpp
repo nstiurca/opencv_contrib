@@ -27,8 +27,6 @@ public:
     CV_WRAP virtual void setMatcher(Ptr<DescriptorMatcher> matcher) { this->matcher = matcher; }
     CV_WRAP virtual const Ptr<DescriptorMatcher> getMatcher() const { return matcher; }
 
-    virtual AlgorithmInfo* info() const;
-
 protected:
     virtual int getNormType() const { return detector->defaultNorm(); }
 
@@ -51,12 +49,6 @@ protected:
     std::vector<std::vector<vID> > adjacencyLists;
 //    Ptr<Tracks> tracks;
 };
-
-CV_INIT_ALGORITHM(SimpleTrackBuilder_Impl, "TrackBuilder.Simple",
-    obj.info()->addParam(obj, "ratio_threshold", obj.ratio_threshold);
-    obj.info()->addParam(obj, "detector", obj.detector);
-    /*obj.info()->addParam(obj, "extractor", obj.extractor);*/
-    obj.info()->addParam(obj, "matcher", obj.matcher))
 
 Ptr<SimpleTrackBuilder> SimpleTrackBuilder::create(double ratio_threshold,
         Ptr<FeatureDetector> detector,

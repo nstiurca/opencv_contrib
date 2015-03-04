@@ -7,10 +7,11 @@
  //  copy or use the software.
  //
  //
- //                           License Agreement
+ //                          License Agreement
  //                For Open Source Computer Vision Library
  //
- // Copyright (C) 2013, OpenCV Foundation, all rights reserved.
+ // Copyright (C) 2000-2008, Intel Corporation, all rights reserved.
+ // Copyright (C) 2009, Willow Garage Inc., all rights reserved.
  // Third party copyrights are property of their respective owners.
  //
  // Redistribution and use in source and binary forms, with or without modification,
@@ -40,19 +41,31 @@
  //M*/
 
 #include "precomp.hpp"
-#include "opencv2/sfm.hpp"
 
 namespace cv
 {
-
-bool initModule_sfm(void)
+namespace xfeatures2d
 {
-    Ptr<TrackBuilder> tb;
 
-    tb = SimpleTrackBuilder::create();
-    tb->info();
+Ptr<Feature2D> Feature2D_create(const String &feature2dType)
+{
+    Ptr<Feature2D> f2d;
+    if(!feature2dType.compare("BriefDescriptorExtractor")) {
+        f2d = BriefDescriptorExtractor::create();
+    } else if(!feature2dType.compare("FREAK")) {
+        f2d = FREAK::create();
+    } else if(!feature2dType.compare("StarDetector")) {
+        f2d = StarDetector::create();
+    } else if(!feature2dType.compare("SIFT")) {
+        f2d = SIFT::create();
+    } else if(!feature2dType.compare("SURF")) {
+        f2d = SURF::create();
+    } else {
+        f2d = Feature2D::create(feature2dType);
+    }
 
-    return true;
+    return f2d;
 }
 
+}
 }

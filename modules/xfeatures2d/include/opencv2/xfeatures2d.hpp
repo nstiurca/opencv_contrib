@@ -131,6 +131,10 @@ public:
     
 //! @}
 
+/** @brief Factory function which expands on Feature2D::create() with types defined in this module.
+ */
+CV_EXPORTS Ptr<Feature2D> Feature2D_create(const String &featureType);
+
 }
 }
 

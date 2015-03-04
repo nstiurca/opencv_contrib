@@ -192,18 +192,6 @@ static void printPointLocAndDesc(ostream &out, const SfMMatcher &matcher, const 
         const set<ID> &ids);
 
 //////////////////////////////////////////////////
-// Init modules
-//////////////////////////////////////////////////
-const bool haveFeatures2d = initModule_features2d();
-const bool havexFeatures2d =
-#ifdef HAVE_xfeatures2d
-    xfeatures2d::initModule_xfeatures2d();
-#else
-    false;
-#endif
-bool haveSfm = initModule_sfm();
-
-//////////////////////////////////////////////////
 // MAIN
 //////////////////////////////////////////////////
 int main(int argc, char **argv)
@@ -212,13 +200,6 @@ int main(int argc, char **argv)
     if(2 > argc) {
         usage(argc, argv);
         exit(-1);
-    }
-
-    // silly check of which algorithms are available
-    {
-        vString algorithms;
-        Algorithm::getList(algorithms);
-        DEBUG(algorithms);
     }
 
     // parse the options from the YAML file
@@ -609,7 +590,11 @@ SfMMatcher SfMMatcher::create(const Options &opts)
 
     if(opts.detector_same_as_extractor) {
         INFO(opts.detector_name);
-        ret.feature2d = Feature2D::create<Feature2D>(opts.detector_name);
+#ifdef HAVE_xfeatures2d
+        ret.feature2d = xfeatures2d::Feature2D_create(opts.detector_name);
+#else
+        ret.feature2d = Feature2D::create(opts.detector_name);
+#endif
         ret.feature2d->read(opts.detector_options);
         if(opts.min_keypoint_distance > 0.0) {
             ret.detector = ret.extractor = ret.feature2d;
@@ -618,9 +603,14 @@ SfMMatcher SfMMatcher::create(const Options &opts)
     } else {
         INFO(opts.detector_name);
         INFO(opts.extractor_name);
-        ret.detector = FeatureDetector::create<FeatureDetector>(opts.detector_name);
+#ifdef HAVE_xfeatures2d
+        ret.detector = xfeatures2d::Feature2D_create(opts.detector_name);
+        ret.extractor = xfeatures2d::Feature2D_create(opts.detector_name);
+#else
+        ret.detector = FeatureDetector::create(opts.detector_name);
+        ret.extractor = DescriptorExtractor::create(opts.extractor_name);
+#endif
         ret.detector->read(opts.detector_options);
-        ret.extractor = DescriptorExtractor::create<DescriptorExtractor>(opts.extractor_name);
         ret.extractor->read(opts.extractor_options);
     }
 
