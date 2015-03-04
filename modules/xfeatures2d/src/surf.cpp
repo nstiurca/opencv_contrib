@@ -876,6 +876,24 @@ SURF_Impl::SURF_Impl(double _threshold, int _nOctaves, int _nOctaveLayers, bool 
     nOctaveLayers = _nOctaveLayers;
 }
 
+void SURF_Impl::write( FileStorage& fs) const
+{
+    CV_FS_WRITE_PROPERTY(HessianThreshold);
+    CV_FS_WRITE_PROPERTY(Extended);
+    CV_FS_WRITE_PROPERTY(Upright);
+    CV_FS_WRITE_PROPERTY(NOctaves);
+    CV_FS_WRITE_PROPERTY(NOctaveLayers);
+}
+
+void SURF_Impl::read( const FileNode& fn)
+{
+    CV_FN_READ_PROPERTY(double, HessianThreshold);
+    CV_FN_READ_PROPERTY(/*bool*/int, Extended);
+    CV_FN_READ_PROPERTY(/*bool*/int, Upright);
+    CV_FN_READ_PROPERTY(int, NOctaves);
+    CV_FN_READ_PROPERTY(int, NOctaveLayers);
+}
+
 int SURF_Impl::descriptorSize() const { return extended ? 128 : 64; }
 int SURF_Impl::descriptorType() const { return CV_32F; }
 int SURF_Impl::defaultNorm() const { return NORM_L2; }

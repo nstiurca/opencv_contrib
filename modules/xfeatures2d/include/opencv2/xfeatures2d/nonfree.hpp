@@ -129,20 +129,11 @@ public:
                   int nOctaves = 4, int nOctaveLayers = 3,
                   bool extended = false, bool upright = false);
 
-    CV_WRAP virtual void setHessianThreshold(double hessianThreshold) = 0;
-    CV_WRAP virtual double getHessianThreshold() const = 0;
-
-    CV_WRAP virtual void setNOctaves(int nOctaves) = 0;
-    CV_WRAP virtual int getNOctaves() const = 0;
-
-    CV_WRAP virtual void setNOctaveLayers(int nOctaveLayers) = 0;
-    CV_WRAP virtual int getNOctaveLayers() const = 0;
-
-    CV_WRAP virtual void setExtended(bool extended) = 0;
-    CV_WRAP virtual bool getExtended() const = 0;
-
-    CV_WRAP virtual void setUpright(bool upright) = 0;
-    CV_WRAP virtual bool getUpright() const = 0;
+    CV_PURE_PROPERTY(double, HessianThreshold)
+    CV_PURE_PROPERTY(int, NOctaves)
+    CV_PURE_PROPERTY(int, NOctaveLayers)
+    CV_PURE_PROPERTY(bool, Extended)
+    CV_PURE_PROPERTY(bool, Upright)
 };
 
 typedef SURF SurfFeatureDetector;
