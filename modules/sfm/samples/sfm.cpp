@@ -134,6 +134,8 @@ struct Options
 //	unordered_map<ID, Node> tracks;
 //}; // class FeatureTrack
 
+typedef Ptr<DescriptorMatcher> pDM;
+typedef vector<pDM> vpDM;
 struct SfMMatcher
 {
     CameraInfo ci;
@@ -146,8 +148,8 @@ struct SfMMatcher
     Ptr<FeatureDetector> detector;
     Ptr<DescriptorExtractor> extractor;
     Ptr<Feature2D> feature2d;
-    Ptr<DescriptorMatcher> matcherTemplate;
-    vector<Ptr<DescriptorMatcher>> matchers;
+    pDM matcherTemplate;
+    vpDM matchers;
 
     vvKeyPoint allKeypoints;
     vector<Mat2f> distortedKPcoords;
@@ -757,21 +759,42 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
 {
     // do pairwise, symmetric matching over all image pairs
     const int N = allDescriptors.size();
-    pairwiseMatches.resize(N, vector<vDMatch>(N));
-    // TODO: make this parallel
     INFO(N);
-    for(int i = 0; i < N; ++i) {
-        for(int j = i + 1; j < N; ++j) {
-            cout << '.'; cout.flush();
-            DEBUG(i);
-            DEBUG(j);
+    pairwiseMatches.resize(N, vector<vDMatch>(N));
 
-            getSymmetricMatches(matchers[i], matchers[j], allDescriptors[i], allDescriptors[j],
-                    pairwiseMatches[i][j], pairwiseMatches[j][i], match_ratio);
-            DEBUG(pairwiseMatches[i][j].size());
+    struct ParLoopBody : public ParallelLoopBody
+    {
+        const vpDM &matchers;
+        vUMat &allDescriptors;
+        vector<vvDMatch> &pairwiseMatches;
+        const double match_ratio;
+        const int N;
+
+        ParLoopBody(const vpDM &matchers, vUMat &allDescriptors,
+                vector<vvDMatch> &pairwiseMatches, const double match_ratio, const int N)
+            : matchers(matchers), allDescriptors(allDescriptors),
+            pairwiseMatches(pairwiseMatches), match_ratio(match_ratio), N(N)
+        {}
+
+        void operator() (const Range &range) const
+        {
+            for(int i=range.start; i<range.end; ++i) {
+                for(int j = i + 1; j < N; ++j) {
+                    cout << '.'; cout.flush();
+                    DEBUG(i);
+                    DEBUG(j);
+
+                    getSymmetricMatches(matchers[i], matchers[j], allDescriptors[i], allDescriptors[j],
+                            pairwiseMatches[i][j], pairwiseMatches[j][i], match_ratio);
+                    DEBUG(pairwiseMatches[i][j].size());
+                }
+                cout << endl;
+            }
         }
-        cout << endl;
-    }
+    };
+
+    ParLoopBody parLoopBody(matchers, allDescriptors, pairwiseMatches, match_ratio, N);
+    parallel_for_(Range(0, N), parLoopBody);
 }
 
 #ifdef HAVE_cvv
