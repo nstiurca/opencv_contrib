@@ -764,37 +764,41 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
 
     struct ParLoopBody : public ParallelLoopBody
     {
-        const vpDM &matchers;
-        vUMat &allDescriptors;
-        vector<vvDMatch> &pairwiseMatches;
+        SfMMatcher &m;
         const double match_ratio;
-        const int N;
+        vector<pair<int,int> > vij;
 
-        ParLoopBody(const vpDM &matchers, vUMat &allDescriptors,
-                vector<vvDMatch> &pairwiseMatches, const double match_ratio, const int N)
-            : matchers(matchers), allDescriptors(allDescriptors),
-            pairwiseMatches(pairwiseMatches), match_ratio(match_ratio), N(N)
-        {}
+        ParLoopBody(SfMMatcher &m, const double match_ratio, const int N)
+            : m(m), match_ratio(match_ratio)
+        {
+            vij.reserve(N*(N-1));
+            for(int i=0; i<N; ++i) {
+                for(int j=i+1; j<N; ++j) {
+                    vij.emplace_back(i,j);
+                }
+            }
+        }
 
         void operator() (const Range &range) const
         {
-            for(int i=range.start; i<range.end; ++i) {
-                for(int j = i + 1; j < N; ++j) {
-                    cout << '.'; cout.flush();
-                    DEBUG(i);
-                    DEBUG(j);
-
-                    getSymmetricMatches(matchers[i], matchers[j], allDescriptors[i], allDescriptors[j],
-                            pairwiseMatches[i][j], pairwiseMatches[j][i], match_ratio);
-                    DEBUG(pairwiseMatches[i][j].size());
-                }
-                cout << endl;
+            for(int idx=range.start; idx<range.end; ++idx) {
+                int i = vij[idx].first;
+                int j = vij[idx].second;
+                getSymmetricMatches(m.matchers[i], m.matchers[j], m.allDescriptors[i], m.allDescriptors[j],
+                        m.pairwiseMatches[i][j], m.pairwiseMatches[j][i], match_ratio);
             }
+            /*
+             * this code breaks since stream insertion is not thread safe
+            vector<char> progress_dots(range.end-range.start+2, '.');
+            progress_dots[progress_dots.size()-2] = '\n';
+            progress_dots[progress_dots.size()-1] = 0;      // null terminated
+            cout << progress_dots.data(); cout.flush();
+            */
         }
     };
 
-    ParLoopBody parLoopBody(matchers, allDescriptors, pairwiseMatches, match_ratio, N);
-    parallel_for_(Range(0, N), parLoopBody);
+    ParLoopBody parLoopBody(*this, match_ratio, N);
+    parallel_for_(Range(0, N*(N-1)), parLoopBody, N);
 }
 
 #ifdef HAVE_cvv
