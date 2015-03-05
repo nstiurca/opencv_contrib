@@ -759,15 +759,18 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
     const int N = allDescriptors.size();
     pairwiseMatches.resize(N, vector<vDMatch>(N));
     // TODO: make this parallel
+    INFO(N);
     for(int i = 0; i < N; ++i) {
         for(int j = i + 1; j < N; ++j) {
-            INFO(i);
-            INFO(j);
+            cout << '.'; cout.flush();
+            DEBUG(i);
+            DEBUG(j);
 
             getSymmetricMatches(matchers[i], matchers[j], allDescriptors[i], allDescriptors[j],
                     pairwiseMatches[i][j], pairwiseMatches[j][i], match_ratio);
-            INFO(pairwiseMatches[i][j].size());
+            DEBUG(pairwiseMatches[i][j].size());
         }
+        cout << endl;
     }
 }
 
