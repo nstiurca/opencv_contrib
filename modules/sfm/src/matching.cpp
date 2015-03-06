@@ -48,7 +48,7 @@ void pruneAsymmetric(vDMatch &matches_i, vDMatch &matches_j)
 }
 
 static void getSymmetricMatchesImpl(const vvDMatch &matches_12_2nn, const vvDMatch &matches_21_2nn,
-        CV_OUT vDMatch &matches_12, CV_OUT vDMatch &matches_21, const double maxDistanceRatio)
+        vDMatch &matches_12, vDMatch &matches_21, const double maxDistanceRatio)
 {
     // prepare output
     CV_DbgAssert(matches_12_2nn.size() <= matches_21_2nn.size());
@@ -59,7 +59,7 @@ static void getSymmetricMatchesImpl(const vvDMatch &matches_12_2nn, const vvDMat
     // copy good, symmetric matches
     for(int i=0; i<Nmax; ++i) {
         const vDMatch &m12 = matches_12_2nn[i];
-        if(m12.size() != 2) {
+        if(m12.size() == 0) {
             WARN(m12.size());
             continue;
         }
@@ -67,11 +67,12 @@ static void getSymmetricMatchesImpl(const vvDMatch &matches_12_2nn, const vvDMat
         CV_DbgAssert(m12[0].queryIdx == i);
         CV_DbgAssert(m12[1].queryIdx == i);
 
-        if(m12[0].distance < m12[1].distance * maxDistanceRatio) {
+        if(m12.size() == 1 ||
+                m12[0].distance < m12[1].distance * maxDistanceRatio) {
             // match from 1 to 2 is good
             const int j = m12[0].trainIdx;
             const vDMatch &m21 = matches_21_2nn[j];
-            if(m21.size() != 2) {
+            if(m21.size() == 0) {
                 WARN(m21.size());
                 continue;
             }
@@ -81,7 +82,8 @@ static void getSymmetricMatchesImpl(const vvDMatch &matches_12_2nn, const vvDMat
 
             if(m21[0].trainIdx == i) {
                 // match from j points to i
-                if(m21[0].distance < m21[1].distance * maxDistanceRatio) {
+                if(m21.size() == 1 ||
+                        m21[0].distance < m21[1].distance * maxDistanceRatio) {
                     // match from j to i passes ratio test
                     CV_DbgAssert(m12[0].distance == m21[0].distance);
                     matches_12.push_back(m12[0]);
