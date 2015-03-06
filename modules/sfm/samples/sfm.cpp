@@ -99,6 +99,7 @@ struct Options
     FileNode matcher_options;
     double match_ratio;
     double min_keypoint_distance;
+    int min_track_length;
 
     static Options create(const String &optionsFname);
 };
@@ -144,6 +145,7 @@ struct SfMMatcher
     typedef vector<vKPp> vvKPp;
     vector<vvKPp> grid;
     double min_keypoint_distance;
+    int min_track_length;
 
     Ptr<FeatureDetector> detector;
     Ptr<DescriptorExtractor> extractor;
@@ -317,7 +319,7 @@ int main(int argc, char **argv)
     for(const auto &track : tracks) {
 //        DEBUG(track.size());
 //        DEBUG(track);
-        if(track.size() < 2) {
+        if(track.size() < opts.min_track_length) {
             ++smallTracks;
             WARN(track.size());
             continue;
@@ -569,6 +571,9 @@ Options Options::create(const String &optionsFname)
     ret.min_keypoint_distance = fs["min_keypoint_distance"].isNone()
         ? 0.0 : (double)fs["min_keypoint_distance"];
 
+    ret.min_track_length = fs["min_track_length"].isNone()
+        ? 0 : (int)fs["min_track_length"];
+
     return ret;
 }
 
@@ -583,6 +588,7 @@ SfMMatcher SfMMatcher::create(const Options &opts)
 
     ret.ci = opts.ci;
     ret.min_keypoint_distance = opts.min_keypoint_distance;
+    ret.min_track_length = opts.min_track_length;
 
     if(ret.min_keypoint_distance > 0.0) {
         const int M = ret.ci.rows / ret.min_keypoint_distance;
@@ -771,12 +777,15 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
         ParLoopBody(SfMMatcher &m, const double match_ratio, const int N)
             : m(m), match_ratio(match_ratio)
         {
-            vij.reserve(N*(N-1));
+            vij.reserve(N*(N-1)/2);
             for(int i=0; i<N; ++i) {
                 for(int j=i+1; j<N; ++j) {
                     vij.emplace_back(i,j);
                 }
             }
+            DEBUG(vij.size());
+            DEBUG(N*(N-1)/2);
+            CV_DbgAssert((int)vij.size() == N*(N-1)/2);
         }
 
         void operator() (const Range &range) const
@@ -787,18 +796,15 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
                 getSymmetricMatches(m.matchers[i], m.matchers[j], m.allDescriptors[i], m.allDescriptors[j],
                         m.pairwiseMatches[i][j], m.pairwiseMatches[j][i], match_ratio);
             }
-            /*
-             * this code breaks since stream insertion is not thread safe
             vector<char> progress_dots(range.end-range.start+2, '.');
             progress_dots[progress_dots.size()-2] = '\n';
             progress_dots[progress_dots.size()-1] = 0;      // null terminated
             cout << progress_dots.data(); cout.flush();
-            */
         }
     };
 
     ParLoopBody parLoopBody(*this, match_ratio, N);
-    parallel_for_(Range(0, N*(N-1)), parLoopBody, N);
+    parallel_for_(Range(0, parLoopBody.vij.size()), parLoopBody, N);
 }
 
 #ifdef HAVE_cvv
@@ -929,6 +935,8 @@ void SfMMatcher::getTracks(vvID &tracks_)
 {
     tracks->getTracks(tracks_);
 
+    // first, prune elements from tracks that have multiple keypoints
+    // from the same image
     for(auto &track : tracks_) {
         CV_DbgAssert(!track.empty());
 //        INFO(track.size());
@@ -958,6 +966,11 @@ void SfMMatcher::getTracks(vvID &tracks_)
 //        DEBUG((track.size() - (w - track.begin())));
         track.resize(w - track.begin());
     } // for( track : tracks)
+
+    // finally, prune short tracks
+    auto new_end = std::remove_if(tracks_.begin(), tracks_.end(),
+                [=](const vID &vid) { return (int)vid.size() < min_track_length; });
+    tracks_.resize(new_end - tracks_.begin());
 } // void SfMMatcher::getTracks(vvID &tracks_)
 
 #ifdef HAVE_cvv
@@ -1136,8 +1149,9 @@ istream& operator>>(istream &in, PoseWithVel &odo)
 			// TODO: output extractor options
 			<< NV(o.matcher_name) << endl
 			// TODO: output matcher options
-			<< NV(o.match_ratio)
-			<< NV(o.min_keypoint_distance);
+			<< NV(o.match_ratio) << endl
+			<< NV(o.min_keypoint_distance) << endl
+            << NV(o.min_track_length);
 }
 
 //::std::ostream& operator<<( ::std::ostream &out, const ::cv::ID &id)
