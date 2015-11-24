@@ -20,6 +20,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/features2d.hpp>
+#include <opencv2/calib3d.hpp>
 #ifdef HAVE_xfeatures2d
 #include <opencv2/xfeatures2d.hpp>
 #endif
@@ -98,6 +99,7 @@ struct Options
     String matcher_name;
     FileNode matcher_options;
     double match_ratio;
+    bool prune_outliers;
     double min_keypoint_distance;
     int min_track_length;
 
@@ -172,7 +174,7 @@ struct SfMMatcher
     void cvvPlotKeypoints(InputArrayOfArrays _imgs, const Scalar &color = Scalar::all(-1),
             int flags = DrawMatchesFlags::DRAW_RICH_KEYPOINTS) const;
     void trainMatchers();
-    void computePairwiseSymmetricMatches(const double match_ratio);
+    void computePairwiseSymmetricMatches(const double match_ratio, bool prune_outliers);
     void cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const;
 //    void buildAdjacencyListsAndFeatureTracks_old();
     void buildAdjacencyListsAndFeatureTracks();
@@ -253,7 +255,7 @@ int main(int argc, char **argv)
     matcher.trainMatchers();
 
     // do pairwise, symmetric matching over all image pairs
-    matcher.computePairwiseSymmetricMatches(opts.match_ratio);
+    matcher.computePairwiseSymmetricMatches(opts.match_ratio, opts.prune_outliers);
     matcher.cvvVisualizePairwiseMatches(imgsC);
 
     // build feature tracks
@@ -287,6 +289,7 @@ int main(int argc, char **argv)
             CV_Assert(ofs);     // check that the previous file was OK
             ofs.close();        // close previous file
             ofs.open(fname);    // TODO: check ofs is ready for opening?
+            if(!ofs) ERROR(fname);
             CV_Assert(ofs);     // check that new file is OK
         }
 
@@ -376,7 +379,7 @@ int main(int argc, char **argv)
 
         ofs << endl;
 
-        if(i % 300 == 0) {
+        if(i % 30000 == 0) {
             printf("Finished writing descriptor % 6i / % 6i (%.1f%%)\n", i, (int)tracks.size(),
                     i * 100.0 / tracks.size());
         }
@@ -567,6 +570,8 @@ Options Options::create(const String &optionsFname)
     ret.matcher_options = fs["matcher"]["options"];
 
     ret.match_ratio = (double)fs["match_ratio"];
+    ret.prune_outliers = fs["prune_outliers"].isNone()
+        ? false : (int)fs["prune_outliers"];
 
     ret.min_keypoint_distance = fs["min_keypoint_distance"].isNone()
         ? 0.0 : (double)fs["min_keypoint_distance"];
@@ -754,14 +759,18 @@ void SfMMatcher::trainMatchers()
     const int N = allDescriptors.size();
     matchers.resize(N);
     for(int i = 0; i < N; ++i) {
+        if(i%10 == 0) {
+            printf("Train % 4i / %i (%.1f%%).\n", i + 1, N, 100.0 * (i + 1) / N);
+        }
         matchers[i] = matcherTemplate->clone(true);
-        matchers[i]->add(allDescriptors[i]);
-        matchers[i]->train();
-        printf("Train % 4i / %i (%.1f%%).\n", i + 1, N, 100.0 * (i + 1) / N);
+        if(allKeypoints[i].size()) {
+	    matchers[i]->add(allDescriptors[i]);
+            matchers[i]->train();
+        }
     }
 }
 
-void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
+void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio, bool prune_outliers)
 {
     // do pairwise, symmetric matching over all image pairs
     const int N = allDescriptors.size();
@@ -772,10 +781,11 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
     {
         SfMMatcher &m;
         const double match_ratio;
+        const bool prune_outliers;
         vector<pair<int,int> > vij;
 
-        ParLoopBody(SfMMatcher &m, const double match_ratio, const int N)
-            : m(m), match_ratio(match_ratio)
+        ParLoopBody(SfMMatcher &m, const double match_ratio, const bool prune_outliers, const int N)
+            : m(m), match_ratio(match_ratio), prune_outliers(prune_outliers)
         {
             vij.reserve(N*(N-1)/2);
             for(int i=0; i<N; ++i) {
@@ -790,11 +800,46 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
 
         void operator() (const Range &range) const
         {
+            Mat2f ptsi, ptsj;
+            //vector<uint8_t> inliers_mask;
+            //cv::Mat_<uint8_t> inliers_mask;
+            cv::Mat inliers_mask;
             for(int idx=range.start; idx<range.end; ++idx) {
                 int i = vij[idx].first;
                 int j = vij[idx].second;
+                vDMatch &mij = m.pairwiseMatches[i][j];
+                vDMatch &mji = m.pairwiseMatches[j][i];
                 getSymmetricMatches(m.matchers[i], m.matchers[j], m.allDescriptors[i], m.allDescriptors[j],
-                        m.pairwiseMatches[i][j], m.pairwiseMatches[j][i], match_ratio);
+                        mij, mji, match_ratio);
+                const int nMatchesMax = mij.size();
+                if(nMatchesMax < 20) {
+                    mij.clear();
+                    mji.clear();
+                    continue;
+                }
+                if(prune_outliers) {
+                    ptsi.create(nMatchesMax, 1);
+                    ptsj.create(nMatchesMax, 1);
+                    for(int k=0; k<nMatchesMax; ++k) {
+                        ptsi(k) = m.undistortedKPcoords[i](mij[k].queryIdx);
+                        ptsj(k) = m.undistortedKPcoords[j](mij[k].trainIdx);
+                    }
+                    cv::findFundamentalMat(ptsi, ptsj, inliers_mask);
+                    int readIdx = 0;
+                    int writeIdx = 0;
+                    while(readIdx < nMatchesMax) {
+                        if(inliers_mask.at<uint8_t>(readIdx)) {
+                            if(writeIdx != readIdx) {
+                                mij[writeIdx] = mij[readIdx];
+                                mji[writeIdx] = mji[readIdx];
+                            }
+                            ++writeIdx;
+                        }
+                        ++readIdx;
+                    }
+                    mij.resize(writeIdx);
+                    mji.resize(writeIdx);
+                }
             }
             vector<char> progress_dots(range.end-range.start+2, '.');
             progress_dots[progress_dots.size()-2] = '\n';
@@ -803,7 +848,7 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio)
         }
     };
 
-    ParLoopBody parLoopBody(*this, match_ratio, N);
+    ParLoopBody parLoopBody(*this, match_ratio, prune_outliers, N);
     parallel_for_(Range(0, parLoopBody.vij.size()), parLoopBody, N);
 }
 
@@ -1150,6 +1195,7 @@ istream& operator>>(istream &in, PoseWithVel &odo)
 			<< NV(o.matcher_name) << endl
 			// TODO: output matcher options
 			<< NV(o.match_ratio) << endl
+            << NV(o.prune_outliers) << endl
 			<< NV(o.min_keypoint_distance) << endl
             << NV(o.min_track_length);
 }
