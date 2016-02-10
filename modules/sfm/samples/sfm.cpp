@@ -100,6 +100,7 @@ struct Options
     FileNode matcher_options;
     double match_ratio;
     bool prune_outliers;
+    double min_disparity;
     double min_keypoint_distance;
     int min_track_length;
 
@@ -146,6 +147,7 @@ struct SfMMatcher
     typedef vector<KeyPoint*> vKPp;
     typedef vector<vKPp> vvKPp;
     vector<vvKPp> grid;
+    double min_disparity;
     double min_keypoint_distance;
     int min_track_length;
 
@@ -174,7 +176,7 @@ struct SfMMatcher
     void cvvPlotKeypoints(InputArrayOfArrays _imgs, const Scalar &color = Scalar::all(-1),
             int flags = DrawMatchesFlags::DRAW_RICH_KEYPOINTS) const;
     void trainMatchers();
-    void computePairwiseSymmetricMatches(const double match_ratio, bool prune_outliers);
+    void computePairwiseSymmetricMatches(const double match_ratio, bool prune_outliers, const double min_disparity);
     void cvvVisualizePairwiseMatches(InputArrayOfArrays _imgs) const;
 //    void buildAdjacencyListsAndFeatureTracks_old();
     void buildAdjacencyListsAndFeatureTracks();
@@ -255,7 +257,7 @@ int main(int argc, char **argv)
     matcher.trainMatchers();
 
     // do pairwise, symmetric matching over all image pairs
-    matcher.computePairwiseSymmetricMatches(opts.match_ratio, opts.prune_outliers);
+    matcher.computePairwiseSymmetricMatches(opts.match_ratio, opts.prune_outliers, opts.min_disparity);
     matcher.cvvVisualizePairwiseMatches(imgsC);
 
     // build feature tracks
@@ -573,6 +575,9 @@ Options Options::create(const String &optionsFname)
     ret.prune_outliers = fs["prune_outliers"].isNone()
         ? false : (int)fs["prune_outliers"];
 
+    ret.min_disparity = fs["min_disparity"].isNone()
+        ? 0.0 : (double)fs["min_disparity"];
+
     ret.min_keypoint_distance = fs["min_keypoint_distance"].isNone()
         ? 0.0 : (double)fs["min_keypoint_distance"];
 
@@ -592,6 +597,7 @@ SfMMatcher SfMMatcher::create(const Options &opts)
     SfMMatcher ret;
 
     ret.ci = opts.ci;
+    ret.min_disparity = opts.min_disparity;
     ret.min_keypoint_distance = opts.min_keypoint_distance;
     ret.min_track_length = opts.min_track_length;
 
@@ -770,7 +776,8 @@ void SfMMatcher::trainMatchers()
     }
 }
 
-void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio, bool prune_outliers)
+void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio, bool prune_outliers,
+        const double min_disparity)
 {
     // do pairwise, symmetric matching over all image pairs
     const int N = allDescriptors.size();
@@ -781,11 +788,13 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio, bool 
     {
         SfMMatcher &m;
         const double match_ratio;
+        const double min_disparity2;
         const bool prune_outliers;
         vector<pair<int,int> > vij;
 
-        ParLoopBody(SfMMatcher &m, const double match_ratio, const bool prune_outliers, const int N)
-            : m(m), match_ratio(match_ratio), prune_outliers(prune_outliers)
+        ParLoopBody(SfMMatcher &m, const double match_ratio, const bool prune_outliers,
+            const double min_disparity, const int N)
+            : m(m), match_ratio(match_ratio), min_disparity2(min_disparity*min_disparity), prune_outliers(prune_outliers)
         {
             vij.reserve(N*(N-1)/2);
             for(int i=0; i<N; ++i) {
@@ -811,6 +820,26 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio, bool 
                 vDMatch &mji = m.pairwiseMatches[j][i];
                 getSymmetricMatches(m.matchers[i], m.matchers[j], m.allDescriptors[i], m.allDescriptors[j],
                         mij, mji, match_ratio);
+
+                if(min_disparity2 > 0.0) {
+                    int readIdx = 0;
+                    int writeIdx = 0;
+                    while(readIdx < mij.size()) {
+                        const auto &pi = m.undistortedKPcoords[i](mij[readIdx].queryIdx);
+                        const auto &pj = m.undistortedKPcoords[j](mij[readIdx].trainIdx);
+                        const double disparity2 = pi.dot(pj);
+                        if( disparity2 >= min_disparity2 ) {
+                            if(writeIdx != readIdx) {
+                                mij[writeIdx] = mij[readIdx];
+                                mji[writeIdx] = mji[readIdx];
+                            }
+                            ++writeIdx;
+                        }
+                        ++readIdx;
+                    }
+                    mij.resize(writeIdx);
+                    mji.resize(writeIdx);
+                }
                 const int nMatchesMax = mij.size();
                 if(nMatchesMax < 20) {
                     mij.clear();
@@ -848,7 +877,7 @@ void SfMMatcher::computePairwiseSymmetricMatches(const double match_ratio, bool 
         }
     };
 
-    ParLoopBody parLoopBody(*this, match_ratio, prune_outliers, N);
+    ParLoopBody parLoopBody(*this, match_ratio, prune_outliers, min_disparity, N);
     parallel_for_(Range(0, parLoopBody.vij.size()), parLoopBody, N);
 }
 
@@ -1196,6 +1225,7 @@ istream& operator>>(istream &in, PoseWithVel &odo)
 			// TODO: output matcher options
 			<< NV(o.match_ratio) << endl
             << NV(o.prune_outliers) << endl
+            << NV(o.min_disparity) << endl
 			<< NV(o.min_keypoint_distance) << endl
             << NV(o.min_track_length);
 }
